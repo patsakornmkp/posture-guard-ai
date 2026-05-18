@@ -1,0 +1,68 @@
+.btn-primary,
+.btn-secondary,
+.btn-danger {
+    padding: 11px 20px;
+    font-size: 14px;
+    font-weight: 500;
+    font-family: inherit;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.btn-primary {
+    background: var(--accent);
+    color: white;
+}
+
+.btn-primary:hover:not(:disabled) {
+    background: var(--accent-hover);
+}
+
+.btn-secondary {
+    background: var(--bg-alt);
+    color: var(--fg);
+    border: 1px solid var(--border);
+}
+
+.btn-secondary:hover:not(:disabled) {
+    background: var(--border);
+}
+
+.btn-danger {
+    background: var(--bad);
+    color: white;
+}
+
+.btn-danger:hover:not(:disabled) {
+    background: #a83434;
+}
+
+.btn-large {
+    width: 100%;
+    padding: 14px;
+    font-size: 15px;
+}
+
+button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+form button[type="submit"] {
+    width: 100%;
+    padding: 11px;
+    font-size: 14px;
+    font-weight: 500;
+    font-family: inherit;
+    color: white;
+    background: var(--accent);
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+form button[type="submit"]:hover:not(:disabled) {
+    background: var(--accent-hover);
+}

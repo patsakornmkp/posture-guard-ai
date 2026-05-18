@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>สมัครสมาชิก · PostureGuard</title>
+    <link rel="stylesheet" href="../css/base.css">
+    <link rel="stylesheet" href="../css/layout.css">
+    <link rel="stylesheet" href="../css/buttons.css">
+    <link rel="stylesheet" href="../css/auth.css">
+    <link rel="stylesheet" href="../css/setup.css">
+    <link rel="stylesheet" href="../css/monitoring.css">
+    <link rel="stylesheet" href="../css/summary.css">
+    <link rel="stylesheet" href="../css/history.css">
+    <link rel="stylesheet" href="../css/responsive.css">
+</head>
+<body>
+    <main class="auth-page">
+        <div class="auth-box">
+            <h1 class="logo">PostureGuard</h1>
+            <p class="tagline">สร้างบัญชีใหม่</p>
+
+            <form id="registerForm">
+                <div class="field">
+                    <label for="fullName">ชื่อ-นามสกุล</label>
+                    <input type="text" id="fullName">
+                </div>
+
+                <div class="field">
+                    <label for="username">Username</label>
+                    <input type="text" id="username" required minlength="3">
+                </div>
+
+                <div class="field">
+                    <label for="password">Password</label>
+                    <input type="password" id="password" required minlength="4">
+                </div>
+
+                <div id="message" class="message" hidden></div>
+
+                <button type="submit" id="submitBtn">สมัครสมาชิก</button>
+            </form>
+
+            <p class="switch">
+                มีบัญชีอยู่แล้ว? <a href="login.html">เข้าสู่ระบบ</a>
+            </p>
+        </div>
+    </main>
+
+    <script src="../js/app.js"></script>
+    <script src="../js/register.js"></script>
+</body>
+</html>

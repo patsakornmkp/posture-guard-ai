@@ -1,0 +1,381 @@
+/* =========================
+   Monitoring Header Lock
+========================= */
+
+.app-monitoring .topbar {
+    border-bottom-color: rgba(29, 158, 117, 0.25);
+}
+
+.app-monitoring .topbar-brand:hover {
+    color: var(--fg);
+}
+
+.session-badge {
+    height: 38px;
+    padding: 0 16px;
+    border-radius: 999px;
+
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+
+    background: var(--accent-bg);
+    color: var(--accent);
+
+    font-size: 13px;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.session-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 999px;
+    background: var(--accent);
+    display: inline-block;
+
+    animation: sessionPulse 1.4s ease-in-out infinite;
+}
+
+@keyframes sessionPulse {
+    0% {
+        opacity: 0.4;
+        transform: scale(0.85);
+    }
+
+    50% {
+        opacity: 1;
+        transform: scale(1);
+    }
+
+    100% {
+        opacity: 0.4;
+        transform: scale(0.85);
+    }
+}
+
+@media (max-width: 560px) {
+    .session-badge {
+        width: 100%;
+    }
+}
+/* =========================
+   Header / Topbar Fix
+========================= */
+
+.topbar {
+    min-height: 72px;
+    padding: 0 32px;
+    background: rgba(255, 255, 255, 0.96);
+    border-bottom: 1px solid var(--border);
+
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
+    gap: 24px;
+
+    flex-shrink: 0;
+    position: sticky;
+    top: 0;
+    z-index: 50;
+
+    backdrop-filter: blur(12px);
+}
+
+.topbar-brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    color: var(--fg);
+    text-decoration: none;
+    min-width: 0;
+}
+
+.topbar-brand:hover {
+    text-decoration: none;
+}
+
+.brand-mark {
+    width: 42px;
+    height: 42px;
+    border-radius: 14px;
+    background: var(--accent);
+    color: #ffffff;
+
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+
+    font-size: 13px;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+
+    flex-shrink: 0;
+}
+
+.brand-text {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.15;
+}
+
+.brand-name {
+    font-size: 18px;
+    font-weight: 800;
+    color: var(--fg);
+    letter-spacing: -0.03em;
+}
+
+.brand-subtitle {
+    margin-top: 3px;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--muted);
+}
+
+.topbar-nav {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+.topbar-link {
+    height: 38px;
+    padding: 0 16px;
+    border-radius: 999px;
+
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+
+    color: var(--muted);
+    background: transparent;
+
+    font-size: 14px;
+    font-weight: 700;
+    text-decoration: none;
+
+    transition: background 0.2s, color 0.2s;
+}
+
+.topbar-link:hover {
+    background: var(--accent-bg);
+    color: var(--accent);
+    text-decoration: none;
+}
+
+.topbar-link.active {
+    background: var(--accent);
+    color: #ffffff;
+}
+
+.topbar-user-area {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 12px;
+
+    padding-left: 18px;
+    border-left: 1px solid var(--border);
+}
+
+.topbar-user {
+    max-width: 170px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--muted);
+
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.topbar-logout {
+    height: 38px;
+    padding: 0 15px;
+
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--bg);
+
+    color: var(--fg);
+    font-size: 13px;
+    font-weight: 700;
+    font-family: inherit;
+
+    cursor: pointer;
+    transition: background 0.2s, border-color 0.2s, color 0.2s;
+}
+
+.topbar-logout:hover {
+    background: var(--bad-bg);
+    border-color: var(--bad);
+    color: var(--bad);
+}
+
+/* =========================
+   Dashboard Layout Fix
+========================= */
+
+.dashboard {
+    flex: 1;
+    width: 100%;
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 28px 32px;
+}
+
+/* =========================
+   Footer Fix
+========================= */
+
+.footer {
+    min-height: 72px;
+    padding: 16px 24px;
+
+    border-top: 1px solid var(--border);
+    background: var(--bg);
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    flex-shrink: 0;
+}
+
+.footer-inner {
+    width: 100%;
+    max-width: 1180px;
+
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.footer-title {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 800;
+    color: var(--fg);
+    white-space: nowrap;
+}
+
+.footer-desc {
+    margin: 0;
+    font-size: 12px;
+    color: var(--muted);
+    text-align: center;
+}
+
+.footer-meta {
+    margin: 0;
+    font-size: 12px;
+    color: var(--dim);
+    white-space: nowrap;
+}
+
+/* ซ่อน footer ในหน้าที่ต้องใช้พื้นที่เยอะ */
+.app-summary .footer,
+.app-monitoring .footer {
+    display: none;
+}
+
+/* =========================
+   Responsive Fix
+========================= */
+
+@media (max-width: 900px) {
+    .topbar {
+        grid-template-columns: 1fr auto;
+        padding: 14px 20px;
+        gap: 14px;
+    }
+
+    .topbar-brand {
+        grid-column: 1 / 2;
+    }
+
+    .topbar-user-area {
+        grid-column: 2 / 3;
+        padding-left: 0;
+        border-left: none;
+    }
+
+    .topbar-nav {
+        grid-column: 1 / -1;
+        justify-content: center;
+        width: 100%;
+    }
+
+    .topbar-link {
+        flex: 1;
+        max-width: 180px;
+    }
+
+    .footer-inner {
+        flex-direction: column;
+        gap: 6px;
+        text-align: center;
+    }
+
+    .footer-title,
+    .footer-meta {
+        white-space: normal;
+    }
+}
+
+@media (max-width: 560px) {
+    .topbar {
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        padding: 14px 16px;
+    }
+
+    .topbar-brand {
+        justify-content: center;
+    }
+
+    .brand-subtitle {
+        display: none;
+    }
+
+    .topbar-nav {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+    }
+
+    .topbar-link {
+        max-width: none;
+        width: 100%;
+    }
+
+    .topbar-user-area {
+        width: 100%;
+        justify-content: center;
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+
+    .topbar-user {
+        width: 100%;
+        max-width: 100%;
+        text-align: center;
+    }
+
+    .topbar-logout {
+        width: 100%;
+    }
+
+    .dashboard {
+        padding: 20px 16px;
+    }
+
+    .footer {
+        padding: 14px 16px;
+    }
+}

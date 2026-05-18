@@ -1,0 +1,578 @@
+.summary-dashboard {
+    padding-top: 12px;
+}
+
+/* =========================
+   Page Layout
+========================= */
+
+.summary-page.summary-compact {
+    max-width: 1180px;
+    margin: 0 auto;
+
+    min-height: calc(100vh - 118px);
+    height: auto;
+
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    overflow: visible;
+}
+
+.summary-topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-shrink: 0;
+}
+
+.summary-title {
+    font-size: 22px;
+    font-weight: 700;
+    margin: 0;
+}
+
+.summary-subtitle {
+    margin: 3px 0 0;
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.summary-actions-top {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+.summary-link-btn,
+.summary-primary-btn {
+    min-width: 96px;
+    height: 40px;
+    padding: 0 16px;
+    border-radius: 10px;
+
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+
+    text-decoration: none;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.summary-link-btn {
+    color: var(--fg);
+    background: var(--bg);
+    border: 1px solid var(--border);
+}
+
+.summary-primary-btn {
+    color: white;
+    background: var(--accent);
+    border: 1px solid var(--accent);
+}
+
+/* =========================
+   Main Grid
+========================= */
+
+.summary-layout {
+    display: grid;
+    grid-template-columns: 0.95fr 1.05fr;
+    gap: 16px;
+    align-items: start;
+}
+
+.summary-left,
+.summary-right {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.summary-right {
+    display: grid;
+    grid-template-rows: auto auto auto;
+    gap: 16px;
+}
+
+.compact-card {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 18px;
+    overflow: hidden;
+}
+
+/* =========================
+   Score Card
+========================= */
+
+.score-card {
+    min-height: 300px;
+    display: grid;
+    grid-template-columns: 160px 1fr;
+    align-items: center;
+    gap: 24px;
+}
+
+.score-circle-wrap {
+    position: relative;
+    width: 150px;
+    height: 150px;
+}
+
+.score-circle {
+    width: 100%;
+    height: 100%;
+    transform: rotate(-90deg);
+}
+
+.score-bg {
+    fill: none;
+    stroke: var(--border);
+    stroke-width: 9;
+}
+
+.score-fg {
+    fill: none;
+    stroke: var(--accent);
+    stroke-width: 9;
+    stroke-linecap: round;
+    transition: stroke-dashoffset 0.8s ease, stroke 0.5s ease;
+}
+
+.score-text {
+    position: absolute;
+    inset: 0;
+
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+}
+
+.score-value {
+    font-size: 42px;
+    font-weight: 800;
+    line-height: 1;
+    color: var(--accent);
+}
+
+.score-label {
+    margin-top: 4px;
+    font-size: 12px;
+    color: var(--muted);
+}
+
+.score-info {
+    min-width: 0;
+}
+
+.section-eyebrow {
+    display: block;
+    margin-bottom: 6px;
+
+    font-size: 11px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+
+.score-grade {
+    font-size: 28px;
+    font-weight: 800;
+    margin: 0 0 8px;
+    color: var(--fg);
+}
+
+.score-message {
+    margin: 0;
+    color: var(--muted);
+    font-size: 13px;
+    line-height: 1.65;
+    max-width: 430px;
+}
+
+.risk-pill {
+    width: fit-content;
+    margin-top: 14px;
+    padding: 7px 12px;
+    border-radius: 999px;
+
+    font-size: 12px;
+    background: var(--bg-alt);
+    border: 1px solid var(--border);
+    color: var(--fg);
+
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.risk-pill.risk-low {
+    background: var(--accent-bg);
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.risk-pill.risk-medium {
+    background: var(--warn-bg);
+    border-color: var(--warn);
+    color: var(--warn);
+}
+
+.risk-pill.risk-high {
+    background: var(--bad-bg);
+    border-color: var(--bad);
+    color: var(--bad);
+}
+
+/* =========================
+   Overview
+========================= */
+
+.overview-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 14px;
+}
+
+.overview-card {
+    min-height: 96px;
+    padding: 16px;
+    border-radius: 14px;
+
+    background: var(--bg);
+    border: 1px solid var(--border);
+
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 6px;
+}
+
+.overview-label {
+    font-size: 12px;
+    color: var(--muted);
+}
+
+.overview-value {
+    font-size: 22px;
+    font-weight: 800;
+    color: var(--fg);
+    font-variant-numeric: tabular-nums;
+}
+
+/* =========================
+   Cards
+========================= */
+
+.card-heading {
+    margin-bottom: 14px;
+}
+
+.card-title {
+    font-size: 16px;
+    font-weight: 700;
+    margin: 0;
+}
+
+.card-desc {
+    margin: 4px 0 0;
+    color: var(--muted);
+    font-size: 12px;
+}
+
+/* =========================
+   Analysis
+========================= */
+
+.analysis-card {
+    min-height: 245px;
+}
+
+.analysis-list {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.analysis-row {
+    display: grid;
+    grid-template-columns: 145px 1fr 48px;
+    gap: 12px;
+    align-items: center;
+}
+
+.analysis-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.analysis-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--fg);
+}
+
+.analysis-time {
+    font-size: 12px;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+}
+
+.analysis-progress {
+    height: 9px;
+    background: var(--bg-alt);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    overflow: hidden;
+}
+
+.analysis-bar {
+    height: 100%;
+    width: 0%;
+    border-radius: 999px;
+    transition: width 0.7s ease;
+}
+
+.analysis-percent {
+    text-align: right;
+    font-size: 13px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+
+.analysis-row.good .analysis-bar {
+    background: var(--accent);
+}
+
+.analysis-row.forward .analysis-bar {
+    background: var(--warn);
+}
+
+.analysis-row.rounded .analysis-bar {
+    background: var(--bad);
+}
+
+/* =========================
+   Insight
+========================= */
+
+.insight-card {
+    min-height: 150px;
+}
+
+.insight-box {
+    padding: 14px;
+    border-radius: 12px;
+
+    display: flex;
+    gap: 14px;
+    align-items: flex-start;
+
+    background: var(--bg-alt);
+    border: 1px solid var(--border);
+}
+
+.insight-marker {
+    width: 4px;
+    min-height: 48px;
+    border-radius: 999px;
+    background: var(--accent);
+    flex-shrink: 0;
+}
+
+.insight-box strong {
+    display: block;
+    font-size: 14px;
+    margin-bottom: 5px;
+}
+
+.insight-box p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 12.5px;
+    line-height: 1.65;
+}
+
+/* =========================
+   Recommendation
+========================= */
+
+.recommendation-card {
+    min-height: 180px;
+}
+
+.rec-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+}
+
+.rec-list li {
+    padding: 10px 12px;
+    background: var(--bg-alt);
+    border-radius: 10px;
+    border-left: 3px solid var(--accent);
+
+    color: var(--fg);
+    font-size: 12.5px;
+    line-height: 1.55;
+}
+
+/* =========================
+   Small Laptop
+========================= */
+
+@media (max-height: 760px) {
+    .summary-page.summary-compact {
+        gap: 10px;
+    }
+
+    .summary-layout {
+        gap: 12px;
+    }
+
+    .summary-left,
+    .summary-right {
+        gap: 12px;
+    }
+
+    .compact-card {
+        padding: 14px;
+    }
+
+    .score-card {
+        min-height: 250px;
+        grid-template-columns: 140px 1fr;
+        gap: 18px;
+    }
+
+    .score-circle-wrap {
+        width: 130px;
+        height: 130px;
+    }
+
+    .score-value {
+        font-size: 36px;
+    }
+
+    .score-grade {
+        font-size: 24px;
+    }
+
+    .score-message {
+        font-size: 12.5px;
+        line-height: 1.55;
+    }
+
+    .overview-card {
+        min-height: 78px;
+        padding: 12px;
+    }
+
+    .overview-value {
+        font-size: 20px;
+    }
+
+    .analysis-card {
+        min-height: 220px;
+    }
+
+    .analysis-list {
+        gap: 12px;
+    }
+
+    .analysis-row {
+        grid-template-columns: 130px 1fr 44px;
+    }
+
+    .insight-card {
+        min-height: 135px;
+    }
+
+    .recommendation-card {
+        min-height: 155px;
+    }
+
+    .rec-list li {
+        padding: 8px 10px;
+        font-size: 12px;
+    }
+}
+
+/* =========================
+   Tablet / Mobile
+========================= */
+
+@media (max-width: 900px) {
+    .summary-page.summary-compact {
+        min-height: auto;
+    }
+
+    .summary-layout {
+        grid-template-columns: 1fr;
+    }
+
+    .score-card {
+        grid-template-columns: 1fr;
+        justify-items: center;
+        text-align: center;
+    }
+
+    .score-info {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+    }
+
+    .overview-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .summary-right {
+        display: flex;
+        flex-direction: column;
+    }
+}
+
+@media (max-width: 520px) {
+    .summary-topbar {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .summary-actions-top {
+        justify-content: flex-end;
+    }
+
+    .summary-actions-top .summary-primary-btn {
+        min-width: 120px;
+    }
+
+    .summary-link-btn,
+    .summary-primary-btn {
+        flex: 1;
+    }
+
+    .overview-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .analysis-row {
+        grid-template-columns: 1fr;
+        gap: 7px;
+    }
+
+    .analysis-percent {
+        text-align: left;
+    }
+}

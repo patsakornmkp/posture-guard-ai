@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="th">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>กำลังตรวจจับ · PostureGuard</title>
+
+    <link rel="stylesheet" href="../css/base.css">
+    <link rel="stylesheet" href="../css/layout.css">
+    <link rel="stylesheet" href="../css/buttons.css">
+    <link rel="stylesheet" href="../css/monitoring.css">
+    <link rel="stylesheet" href="../css/responsive.css">
+</head>
+
+<body class="app-monitoring">
+    <div id="header"></div>
+
+    <main class="dashboard monitoring-dashboard">
+        <section class="active-session" id="activeSession">
+
+            <div class="monitoring-head">
+                <div>
+                    <h2 class="monitoring-title">กำลังตรวจจับท่าทาง</h2>
+                    <p class="monitoring-subtitle">
+                        ระบบจะแสดงสถานะปัจจุบัน พร้อมคำแนะนำเมื่อค่ามุมไม่อยู่ในเกณฑ์ปกติ
+                    </p>
+                </div>
+
+                <div class="monitoring-head-actions">
+                    <div class="camera-chip" id="cameraStatus">
+                        กำลังเชื่อมต่อกล้อง...
+                    </div>
+
+                    <button class="btn-danger monitoring-stop-btn" id="stopBtn" type="button">
+                        ⏹ หยุดการใช้งาน
+                    </button>
+                </div>
+            </div>
+
+            <div class="session-grid">
+
+                <!-- LEFT: CAMERA -->
+                <section class="video-panel">
+                    <div class="video-container">
+                        <img id="videoFeed" alt="Camera feed" class="video-img">
+
+                        <div class="video-overlay">
+                            <span class="live-dot"></span>
+                            Live Camera
+                        </div>
+                    </div>
+
+                    <div class="session-timer-card">
+                        <div class="timer-main">
+                            <div>
+                                <span class="timer-label">เวลาที่ใช้งาน</span>
+                                <div class="timer-line">
+                                    <span class="timer-value" id="elapsedTime">00:00</span>
+                                    <span class="timer-planned">/ <span id="plannedTime">30:00</span></span>
+                                </div>
+                            </div>
+
+                            <div class="timer-remaining">
+                                <span class="timer-label">เวลาคงเหลือ</span>
+                                <strong id="remainingTime">30:00</strong>
+                            </div>
+                        </div>
+
+                        <div class="session-progress">
+                            <div class="session-progress-bar" id="sessionProgressBar"></div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- RIGHT: INFO -->
+                <aside class="info-panel">
+
+                    <div class="status-card" id="statusCard">
+                        <span class="status-eyebrow">สถานะปัจจุบัน</span>
+                        <div class="status-badge" id="statusBadge">กำลังโหลด...</div>
+                        <div class="status-message" id="statusMessage">รอข้อมูลจากระบบ</div>
+                        <p class="status-advice" id="currentAdvice">
+                            ระบบกำลังวิเคราะห์ท่าทางจากกล้อง
+                        </p>
+                    </div>
+
+                    <div class="metrics">
+                        <div class="metric">
+                            <span class="metric-label">คอ / CVA</span>
+                            <div class="metric-number">
+                                <span class="metric-value" id="cvaValue">—</span>
+                                <span class="metric-unit">°</span>
+                            </div>
+                            <span class="metric-hint" id="cvaHint">กำลังอ่านค่า</span>
+                        </div>
+
+                        <div class="metric">
+                            <span class="metric-label">ไหล่ / FSA</span>
+                            <div class="metric-number">
+                                <span class="metric-value" id="fsaValue">—</span>
+                                <span class="metric-unit">°</span>
+                            </div>
+                            <span class="metric-hint" id="fsaHint">กำลังอ่านค่า</span>
+                        </div>
+                    </div>
+
+                    <div class="session-stats">
+                        <div class="stats-heading">
+                            <h3 class="stats-title">สถิติรอบนี้</h3>
+                            <span>สะสมระหว่างใช้งาน</span>
+                        </div>
+
+                        <div class="stat-row">
+                            <span>ท่าทางเหมาะสม</span>
+                            <strong id="goodTime">00:00</strong>
+                        </div>
+
+                        <div class="stat-row">
+                            <span>แจ้งเตือนคอยื่น</span>
+                            <strong id="forwardHeadAlertCount">0 ครั้ง</strong>
+                        </div>
+
+                        <div class="stat-row">
+                            <span>แจ้งเตือนไหล่ห่อ</span>
+                            <strong id="roundedShoulderAlertCount">0 ครั้ง</strong>
+                        </div>
+
+                        <div class="stat-row">
+                            <span>จำนวนแจ้งเตือนรวม</span>
+                            <strong id="alertCount">0 ครั้ง</strong>
+                        </div>
+                    </div>
+
+                    <div class="action-group">
+                        <label class="sound-toggle-card">
+                            <input type="checkbox" id="speechToggleBtn" class="sound-toggle-input">
+
+                            <span class="sound-toggle-switch">
+                                <span class="sound-toggle-knob"></span>
+                            </span>
+
+                            <div class="sound-toggle-text">
+                                <div class="sound-title">การแจ้งเตือนเสียง</div>
+                                <div class="sound-desc" id="soundDesc">ปิดอยู่</div>
+                            </div>
+                        </label>
+
+                        <label class="notify-toggle-card">
+                            <input type="checkbox" id="notifyToggleBtn" class="notify-toggle-input">
+
+                            <span class="notify-toggle-switch">
+                                <span class="notify-toggle-knob"></span>
+                            </span>
+
+                            <div class="notify-toggle-text">
+                                <div class="notify-title">การแจ้งเตือนข้อความ</div>
+                                <div class="notify-desc" id="notifyDesc">เปิดอยู่</div>
+                            </div>
+                        </label>
+                    </div>
+
+                </aside>
+            </div>
+        </section>
+    </main>
+
+    <div id="footer"></div>
+
+    <script src="../js/app.js"></script>
+    <script src="../js/layout.js"></script>
+    <script src="../js/monitoring.js"></script>
+    <script src="../js/alert-speech.js"></script>
+</body>
+
+</html>

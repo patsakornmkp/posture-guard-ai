@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="th">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>เริ่มใช้งาน · PostureGuard</title>
+    <link rel="stylesheet" href="../css/base.css">
+    <link rel="stylesheet" href="../css/layout.css">
+    <link rel="stylesheet" href="../css/buttons.css">
+    <link rel="stylesheet" href="../css/auth.css">
+    <link rel="stylesheet" href="../css/setup.css">
+    <link rel="stylesheet" href="../css/monitoring.css">
+    <link rel="stylesheet" href="../css/summary.css">
+    <link rel="stylesheet" href="../css/history.css">
+    <link rel="stylesheet" href="../css/responsive.css">
+</head>
+
+<body>
+    <div id="header"></div>
+
+    <main class="dashboard">
+        <section class="panel setup-panel">
+            <h2 class="panel-title">เริ่มการใช้งาน</h2>
+            <p class="panel-desc">เลือกระยะเวลาที่คุณจะนั่งทำงาน</p>
+
+            <div class="duration-group" id="durationGroup">
+                <button class="duration-btn" data-minutes="15" type="button">15 นาที</button>
+                <button class="duration-btn" data-minutes="30" type="button">30 นาที</button>
+                <button class="duration-btn" data-minutes="45" type="button">45 นาที</button>
+                <button class="duration-btn" data-minutes="60" type="button">60 นาที</button>
+            </div>
+
+            <button class="btn-primary btn-large is-waiting" id="startBtn" type="button">
+                กรุณาเลือกเวลาก่อน
+            </button>
+
+            <p class="hint-text">
+                ตั้งกล้อง ให้อยู่ด้านข้างตัวคุณ ระบบจะตรวจจับและเตือนเมื่อท่าทางผิด
+            </p>
+        </section>
+    </main>
+
+    <div id="footer"></div>
+
+    <script src="../js/app.js"></script>
+    <script src="../js/layout.js"></script>
+    <script src="../js/setup.js"></script>
+</body>
+
+</html>

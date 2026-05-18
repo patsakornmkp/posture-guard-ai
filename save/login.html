@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>เข้าสู่ระบบ · PostureGuard</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <main class="auth-page">
+        <div class="auth-box">
+            <h1 class="logo">PostureGuard</h1>
+            <p class="tagline">ระบบตรวจจับท่าทางเพื่อลด Office Syndrome</p>
+
+            <form id="loginForm">
+                <div class="field">
+                    <label for="username">Username</label>
+                    <input type="text" id="username" required>
+                </div>
+
+                <div class="field">
+                    <label for="password">Password</label>
+                    <input type="password" id="password" required>
+                </div>
+
+                <div id="message" class="message" hidden></div>
+
+                <button type="submit" id="submitBtn">เข้าสู่ระบบ</button>
+            </form>
+
+            <p class="switch">
+                ยังไม่มีบัญชี? <a href="register.html">สมัครสมาชิก</a>
+            </p>
+        </div>
+    </main>
+
+    <script src="app.js"></script>
+    <script>
+        document.getElementById('loginForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const username = document.getElementById('username').value.trim();
+            const password = document.getElementById('password').value;
+            const msg = document.getElementById('message');
+            const btn = document.getElementById('submitBtn');
+
+            msg.hidden = true;
+            btn.disabled = true;
+            btn.textContent = 'กำลังเข้าสู่ระบบ...';
+
+            try {
+                const user = await api.login(username, password);
+                localStorage.setItem('currentUser', JSON.stringify(user));
+                window.location.href = 'dashboard.html';
+            } catch (err) {
+                msg.hidden = false;
+                msg.textContent = err.message || 'เข้าสู่ระบบไม่สำเร็จ';
+                btn.disabled = false;
+                btn.textContent = 'เข้าสู่ระบบ';
+            }
+        });
+    </script>
+</body>
+</html>

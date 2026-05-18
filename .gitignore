@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.pyc
+
+# Virtual Env
+venv/
+.venv/
+
+# Database
+*.db
+
+# Environment
+.env
+
+# VSCode
+.vscode/
+
+# Logs
+*.log
+
+# Linux
+.DS_Store
+
+# MediaPipe / AI cache
+*.tflite
+
+# Node
+node_modules/

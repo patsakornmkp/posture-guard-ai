@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="th">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ประวัติ · PostureGuard</title>
+
+    <link rel="stylesheet" href="../css/base.css">
+    <link rel="stylesheet" href="../css/layout.css">
+    <link rel="stylesheet" href="../css/buttons.css">
+    <link rel="stylesheet" href="../css/history.css">
+    <link rel="stylesheet" href="../css/responsive.css">
+</head>
+
+<body class="app-history">
+    <div id="header"></div>
+
+    <main class="dashboard">
+        <section class="history-page">
+
+            <header class="history-header">
+                <div>
+                    <h2 class="history-title">ประวัติการใช้งาน</h2>
+                    <p class="history-subtitle">
+                        ดูผลการตรวจจับท่าทางย้อนหลังจากแต่ละรอบการใช้งาน
+                    </p>
+                </div>
+            </header>
+
+            <!-- Summary Cards -->
+            <div class="history-stats" id="historyStats" hidden>
+                <div class="hstat">
+                    <span class="hstat-label">จำนวนรอบทั้งหมด</span>
+                    <span class="hstat-value" id="histTotalSessions">— ครั้ง</span>
+                </div>
+
+                <div class="hstat">
+                    <span class="hstat-label">เวลานั่งจริงรวม</span>
+                    <span class="hstat-value" id="histTotalTime">—</span>
+                </div>
+
+                <div class="hstat">
+                    <span class="hstat-label">ท่าทางปกติเฉลี่ย</span>
+                    <span class="hstat-value" id="histAvgGood">—</span>
+                </div>
+
+                <div class="hstat">
+                    <span class="hstat-label">แจ้งเตือนรวม</span>
+                    <span class="hstat-value" id="histTotalAlerts">— ครั้ง</span>
+                </div>
+            </div>
+
+            <!-- Overview Chart -->
+            <div class="history-overview" id="historyOverview" hidden>
+                <div class="overview-header">
+                    <div>
+                        <h3 class="overview-title">ภาพรวมท่าทางย้อนหลัง</h3>
+                        <p class="overview-desc">
+                            สัดส่วนท่าทางปกติและค่ามุมที่ไม่อยู่ในเกณฑ์จากรอบการใช้งานทั้งหมด
+                        </p>
+                    </div>
+
+                    <div class="overview-score">
+                        <span class="overview-score-label">ท่าทางปกติเฉลี่ย</span>
+                        <strong id="overviewGoodScore">—%</strong>
+                    </div>
+                </div>
+
+                <div class="overview-bar" aria-label="ภาพรวมสัดส่วนท่าทาง">
+                    <div class="overview-good" id="overviewGoodBar"></div>
+                    <div class="overview-forward" id="overviewForwardBar"></div>
+                    <div class="overview-rounded" id="overviewRoundedBar"></div>
+                </div>
+
+                <div class="overview-legend">
+                    <span>
+                        <i class="legend-dot dot-good"></i>
+                        ท่าทางปกติ <strong id="overviewGoodPct">—%</strong>
+                    </span>
+
+                    <span>
+                        <i class="legend-dot dot-forward"></i>
+                        คอยื่น <strong id="overviewForwardPct">—%</strong>
+                    </span>
+
+                    <span>
+                        <i class="legend-dot dot-rounded"></i>
+                        ไหล่ห่อ <strong id="overviewRoundedPct">—%</strong>
+                    </span>
+                </div>
+
+                <div class="overview-insight" id="overviewInsight">
+                    กำลังวิเคราะห์แนวโน้ม...
+                </div>
+            </div>
+
+            <!-- Toolbar -->
+            <div class="history-toolbar" id="historyToolbar" hidden>
+                <div class="history-toolbar-title">
+                    <strong>รายการรอบการใช้งาน</strong>
+                    <span id="historyCount">—</span>
+                </div>
+
+                <div class="history-controls">
+                    <select id="riskFilter" class="history-select">
+                        <option value="all">ระดับความเสี่ยงทั้งหมด</option>
+                        <option value="low">ความเสี่ยงต่ำ</option>
+                        <option value="medium">ความเสี่ยงปานกลาง</option>
+                        <option value="high">ความเสี่ยงสูง</option>
+                    </select>
+
+                    <select id="sortMode" class="history-select">
+                        <option value="latest">ล่าสุดก่อน</option>
+                        <option value="risk">ความเสี่ยงสูงสุดก่อน</option>
+                        <option value="alerts">แจ้งเตือนมากสุดก่อน</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Session List -->
+            <div class="history-list" id="historyList">
+                <div class="history-loading">
+                    กำลังโหลดประวัติการใช้งาน...
+                </div>
+            </div>
+
+        </section>
+    </main>
+
+    <div id="footer"></div>
+
+    <script src="../js/app.js"></script>
+    <script src="../js/layout.js"></script>
+    <script src="../js/history.js"></script>
+</body>
+
+</html>

@@ -1,0 +1,569 @@
+/* =========================
+   Monitoring Page
+   File: frontend/css/monitoring.css
+========================= */
+
+.monitoring-dashboard {
+    width: 100%;
+    max-width: min(1520px, calc(100vw - 72px));
+    margin: 0 auto;
+    padding: 18px 24px 24px;
+}
+
+.active-session {
+    position: relative;
+}
+
+/* =========================
+   Header
+========================= */
+
+.monitoring-head {
+    margin-bottom: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+}
+
+.monitoring-title {
+    margin: 0;
+    font-size: 23px;
+    font-weight: 800;
+    line-height: 1.2;
+    letter-spacing: -0.03em;
+}
+
+.monitoring-subtitle {
+    margin: 4px 0 0;
+    color: var(--muted);
+    font-size: 13px;
+}
+
+.monitoring-head-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+}
+
+.camera-chip {
+    min-height: 40px;
+    padding: 0 16px;
+    border-radius: 999px;
+    background: var(--bg-alt);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 800;
+    white-space: nowrap;
+}
+
+.camera-chip.is-ready {
+    background: var(--accent-bg);
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.camera-chip.is-error {
+    background: var(--bad-bg);
+    border-color: var(--bad);
+    color: var(--bad);
+}
+
+.monitoring-stop-btn {
+    height: 42px;
+    padding: 0 18px;
+    border-radius: 999px;
+    font-size: 13px;
+    font-weight: 800;
+    white-space: nowrap;
+}
+
+/* =========================
+   Layout
+========================= */
+
+.session-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.18fr) minmax(390px, 0.82fr);
+    gap: 22px;
+    align-items: start;
+}
+
+.video-panel {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+}
+
+.info-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+/* =========================
+   Camera
+========================= */
+
+.video-container {
+    width: min(100%, 560px);
+    aspect-ratio: 4 / 3;
+    background: #000;
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    overflow: hidden;
+    position: relative;
+}
+
+.video-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.video-overlay {
+    position: absolute;
+    left: 14px;
+    top: 14px;
+    height: 32px;
+    padding: 0 12px;
+    border-radius: 999px;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(0, 0, 0, 0.56);
+    color: #ffffff;
+    font-size: 12px;
+    font-weight: 800;
+}
+
+.live-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 999px;
+    background: #22c55e;
+    animation: livePulse 1.4s ease-in-out infinite;
+}
+
+@keyframes livePulse {
+    0% {
+        opacity: 0.35;
+        transform: scale(0.85);
+    }
+
+    50% {
+        opacity: 1;
+        transform: scale(1);
+    }
+
+    100% {
+        opacity: 0.35;
+        transform: scale(0.85);
+    }
+}
+
+/* =========================
+   Timer
+========================= */
+
+.session-timer-card {
+    width: min(100%, 560px);
+    padding: 12px 14px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+}
+
+.timer-main {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.timer-label {
+    display: block;
+    margin-bottom: 3px;
+    font-size: 12px;
+    color: var(--muted);
+}
+
+.timer-line {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+}
+
+.timer-value {
+    font-size: 24px;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+    color: var(--fg);
+}
+
+.timer-planned {
+    font-size: 14px;
+    color: var(--dim);
+}
+
+.timer-remaining {
+    text-align: right;
+}
+
+.timer-remaining strong {
+    display: block;
+    font-size: 18px;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+    color: var(--accent);
+}
+
+.session-progress {
+    margin-top: 10px;
+    height: 9px;
+    border-radius: 999px;
+    background: var(--bg-alt);
+    border: 1px solid var(--border);
+    overflow: hidden;
+}
+
+.session-progress-bar {
+    width: 0%;
+    height: 100%;
+    border-radius: 999px;
+    background: var(--accent);
+    transition: width 0.4s ease;
+}
+
+/* =========================
+   Status Card
+========================= */
+
+.status-card {
+    padding: 12px 14px;
+    border-radius: 18px;
+    border: 1px solid var(--accent);
+    text-align: center;
+    background: var(--accent-bg);
+}
+
+.status-card.status-bad {
+    background: var(--bad-bg);
+    border-color: var(--bad);
+}
+
+.status-card.status-idle {
+    background: var(--bg-alt);
+    border-color: var(--border);
+}
+
+.status-eyebrow {
+    display: block;
+    margin-bottom: 5px;
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+
+.status-badge {
+    margin-bottom: 4px;
+    color: var(--accent);
+    font-size: 22px;
+    font-weight: 800;
+}
+
+.status-card.status-bad .status-badge {
+    color: var(--bad);
+}
+
+.status-card.status-idle .status-badge {
+    color: var(--muted);
+}
+
+.status-message {
+    color: var(--muted);
+    font-size: 12.5px;
+    line-height: 1.45;
+}
+
+.status-advice {
+    margin: 6px auto 0;
+    max-width: 520px;
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.45;
+    font-weight: 500;
+    text-align: center;
+}
+
+.status-card.status-bad .status-advice {
+    color: #555;
+}
+
+/* =========================
+   Metrics
+========================= */
+
+.metrics {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+}
+
+.metric {
+    padding: 12px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    text-align: center;
+}
+
+.metric-label {
+    display: block;
+    margin-bottom: 6px;
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.metric-number {
+    display: flex;
+    align-items: baseline;
+    justify-content: center;
+    gap: 4px;
+}
+
+.metric-value {
+    color: var(--fg);
+    font-size: 24px;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+}
+
+.metric-unit {
+    color: var(--muted);
+    font-size: 14px;
+}
+
+.metric-hint {
+    display: block;
+    margin-top: 5px;
+    color: var(--muted);
+    font-size: 10.5px;
+}
+
+/* =========================
+   Session Stats
+========================= */
+
+.session-stats {
+    padding: 13px 15px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+}
+
+.stats-heading {
+    margin-bottom: 6px;
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.stats-title {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 800;
+}
+
+.stats-heading span {
+    color: var(--muted);
+    font-size: 11px;
+}
+
+.stat-row {
+    padding: 7px 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--border);
+    font-size: 12.5px;
+}
+
+.stat-row:last-child {
+    border-bottom: none;
+}
+
+.stat-row span {
+    color: var(--muted);
+}
+
+.stat-row strong {
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+}
+
+/* =========================
+   Alert Toggles
+========================= */
+
+.action-group {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+}
+
+.sound-toggle-card,
+.notify-toggle-card {
+    min-width: 0;
+    min-height: 54px;
+    padding: 9px 11px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+    transition: border-color 0.2s, background 0.2s;
+}
+
+.sound-toggle-card:hover,
+.notify-toggle-card:hover {
+    border-color: var(--accent);
+    background: var(--accent-bg);
+}
+
+.sound-toggle-input,
+.notify-toggle-input {
+    display: none;
+}
+
+.sound-toggle-switch,
+.notify-toggle-switch {
+    width: 40px;
+    height: 22px;
+    border-radius: 999px;
+    background: var(--border);
+    position: relative;
+    flex-shrink: 0;
+    transition: background 0.2s;
+}
+
+.sound-toggle-knob,
+.notify-toggle-knob {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: white;
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.22);
+    transition: transform 0.2s;
+}
+
+.sound-toggle-input:checked + .sound-toggle-switch,
+.notify-toggle-input:checked + .notify-toggle-switch {
+    background: var(--accent);
+}
+
+.sound-toggle-input:checked + .sound-toggle-switch .sound-toggle-knob,
+.notify-toggle-input:checked + .notify-toggle-switch .notify-toggle-knob {
+    transform: translateX(18px);
+}
+
+.sound-toggle-text,
+.notify-toggle-text {
+    min-width: 0;
+}
+
+.sound-title,
+.notify-title {
+    color: var(--fg);
+    font-size: 12.5px;
+    font-weight: 800;
+    line-height: 1.25;
+    white-space: nowrap;
+}
+
+.sound-desc,
+.notify-desc {
+    margin-top: 2px;
+    color: var(--muted);
+    font-size: 10.5px;
+    line-height: 1.2;
+}
+
+/* =========================
+   Responsive
+========================= */
+
+@media (max-width: 1100px) {
+    .monitoring-dashboard {
+        max-width: calc(100vw - 32px);
+        padding-left: 16px;
+        padding-right: 16px;
+    }
+
+    .session-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .monitoring-head {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .monitoring-head-actions {
+        width: 100%;
+        display: grid;
+        grid-template-columns: 1fr auto;
+    }
+
+    .camera-chip {
+        width: 100%;
+    }
+}
+
+@media (max-width: 560px) {
+    .monitoring-dashboard {
+        max-width: 100%;
+        padding: 14px;
+    }
+
+    .monitoring-head-actions {
+        grid-template-columns: 1fr;
+    }
+
+    .monitoring-stop-btn {
+        width: 100%;
+    }
+
+    .metrics {
+        grid-template-columns: 1fr;
+    }
+
+    .action-group {
+        grid-template-columns: 1fr;
+    }
+
+    .timer-main {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .timer-remaining {
+        width: 100%;
+        text-align: left;
+    }
+}
