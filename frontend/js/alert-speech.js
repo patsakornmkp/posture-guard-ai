@@ -110,6 +110,30 @@
         }
     }
 
+    function enableSpeech(announce = false) {
+        if (!("speechSynthesis" in window)) {
+            updateToggleUI(false, "ไม่รองรับ");
+            return false;
+        }
+
+        speechEnabled = true;
+
+        const toggle = document.getElementById("speechToggleBtn");
+
+        if (toggle) {
+            toggle.checked = true;
+            toggle.disabled = false;
+        }
+
+        updateToggleUI(true);
+
+        if (announce) {
+            speak(ENABLE_MESSAGE, true);
+        }
+
+        return true;
+    }
+
     function disableSpeech() {
         speechEnabled = false;
         stopSpeech();
@@ -140,9 +164,7 @@
 
         toggle.addEventListener("change", () => {
             if (toggle.checked) {
-                speechEnabled = true;
-                updateToggleUI(true);
-                speak(ENABLE_MESSAGE, true);
+                enableSpeech(true);
             } else {
                 disableSpeech();
             }
@@ -171,9 +193,12 @@
 
     window.alertSpeech = {
         speak: speakAlert,
+        enable() {
+            return enableSpeech(false);
+        },
         disable: disableSpeech,
         test() {
-            speechEnabled = true;
+            enableSpeech(false);
             speak("ทดสอบเสียงแจ้งเตือน", true);
         },
     };

@@ -38,6 +38,7 @@ from notification_service import (
     get_line_notification_status,
     handle_line_webhook,
     send_test_line_notification,
+    set_line_notification_enabled,
 )
 
 
@@ -504,6 +505,35 @@ def get_line_status():
             "success": False,
             "line": None,
             "message": "Cannot load LINE notification status",
+            "detail": str(err),
+        }
+
+
+@app.post("/notification/line/enabled", response_model=dict)
+def set_line_enabled(payload: dict):
+    """เปิด/ปิด LINE notification จาก Settings Panel หน้า Monitoring"""
+
+    if "enabled" not in payload or not isinstance(payload.get("enabled"), bool):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="enabled must be boolean",
+        )
+
+    try:
+        line_status = set_line_notification_enabled(payload["enabled"])
+
+        return {
+            "success": True,
+            "line": line_status,
+            "message": "LINE notification enabled updated",
+        }
+
+    except Exception as err:
+        # ห้ามให้ปัญหา LINE ทำให้ backend หลักล้ม
+        return {
+            "success": False,
+            "line": None,
+            "message": "Cannot update LINE notification enabled flag",
             "detail": str(err),
         }
 

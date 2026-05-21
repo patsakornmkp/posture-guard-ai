@@ -3,6 +3,7 @@
 #
 # หน้าที่หลัก:
 # - อ่านค่า LINE จาก backend/.env
+# - เปิด/ปิด LINE notification จากหน้า Monitoring
 # - ส่ง LINE push message
 # - รับและตรวจสอบ webhook signature
 # - ดึง LINE userId จาก webhook event
@@ -83,6 +84,7 @@ class LineNotificationService:
     ใช้แนวคิด:
     - classifier.py เป็นตัวตัดสินว่า alert ควรเกิดเมื่อไร
     - service นี้ทำหน้าที่ส่งข้อความและกัน duplicate spam อีกชั้น
+    - หน้า Monitoring สามารถเปิด/ปิด LINE ได้ผ่าน set_enabled()
     """
 
     def __init__(self, env_path: Path = ENV_PATH) -> None:
@@ -94,6 +96,10 @@ class LineNotificationService:
         # session:12:rounded_shoulder
         # session:12:multiple
         self._last_sent_at: dict[str, float] = {}
+
+        # ใช้จำค่าที่ user กดเปิด/ปิดจากหน้าเว็บใน runtime ปัจจุบัน
+        # เพื่อกันปัญหา toggle กดปิดแล้วเด้งกลับเป็นเปิด
+        self._runtime_line_enabled: Optional[bool] = None
 
         self.line_enabled: bool = False
         self.channel_access_token: str = ""
@@ -111,9 +117,20 @@ class LineNotificationService:
 
         env = self._load_env_file()
 
-        self.line_enabled = self._to_bool(
-            self._get_env_value(env, "LINE_ENABLED", "false")
+        # สำหรับ LINE_ENABLED ให้ .env สำคัญกว่า os.environ
+        # เพราะหน้า Monitoring เขียนค่ากลับลง .env
+        # ถ้าใช้ os.environ ทับเสมอ toggle อาจกดปิดแล้วเด้งกลับเป็นเปิด
+        raw_line_enabled = env.get(
+            "LINE_ENABLED",
+            os.getenv("LINE_ENABLED", "false"),
         )
+
+        env_line_enabled = self._to_bool(raw_line_enabled)
+
+        if self._runtime_line_enabled is None:
+            self.line_enabled = env_line_enabled
+        else:
+            self.line_enabled = self._runtime_line_enabled
 
         self.channel_access_token = self._get_env_value(
             env,
@@ -182,6 +199,10 @@ class LineNotificationService:
         1. environment variable จริงของระบบ
         2. backend/.env
         3. default
+
+        หมายเหตุ:
+        - LINE_ENABLED ไม่ใช้ function นี้ใน reload()
+          เพราะต้องให้ .env ทับค่าได้ เพื่อให้ toggle หน้าเว็บไม่เด้งกลับ
         """
 
         return os.getenv(key) or env.get(key, default)
@@ -226,7 +247,7 @@ class LineNotificationService:
         )
 
     # ========================
-    # Validation
+    # Validation / Status
     # ========================
 
     def is_ready(self) -> bool:
@@ -249,6 +270,38 @@ class LineNotificationService:
             "line_user_id": self.line_user_id or None,
             "repeat_interval_seconds": self._get_repeat_interval(),
         }
+
+    # ========================
+    # Runtime settings
+    # ========================
+
+    def set_enabled(self, enabled: bool) -> dict[str, Any]:
+        """
+        เปิด/ปิด LINE notification และบันทึกค่า LINE_ENABLED ลง backend/.env
+
+        แก้ปัญหา:
+        - toggle กดปิดแล้วเด้งกลับ
+        - status ดึงกลับมาแล้วยังเป็น true
+        """
+
+        enabled_bool = bool(enabled)
+
+        with self._lock:
+            self._runtime_line_enabled = enabled_bool
+            self.line_enabled = enabled_bool
+
+            self._write_env_value(
+                "LINE_ENABLED",
+                "true" if enabled_bool else "false",
+            )
+
+        # reload token/secret/user id ใหม่ แต่ยังคงใช้ runtime enabled
+        self.reload()
+
+        # ย้ำค่าอีกครั้งเพื่อกัน environment/cache ทับในบางเครื่อง
+        self.line_enabled = enabled_bool
+
+        return self.get_status()
 
     # ========================
     # Message Builder
@@ -294,8 +347,11 @@ class LineNotificationService:
             "⚠️ ท่านั่งของคุณมีแนวโน้มไม่เหมาะสม\n"
             "กรุณาปรับท่านั่งให้อยู่ในท่าที่เหมาะสม"
         )
+
     @staticmethod
-    def _normalize_issues(issues: list[str] | tuple[str, ...] | set[str]) -> list[str]:
+    def _normalize_issues(
+        issues: list[str] | tuple[str, ...] | set[str],
+    ) -> list[str]:
         allowed = {"forward_head", "rounded_shoulder"}
         result: list[str] = []
 
@@ -635,7 +691,7 @@ class LineNotificationService:
         return user_ids
 
     # ========================
-    # Save LINE_USER_ID
+    # Save / Write .env
     # ========================
 
     def save_line_user_id(self, user_id: str) -> None:
@@ -748,6 +804,12 @@ def handle_line_webhook(
         signature=signature,
         verify_signature=verify_signature,
     )
+
+
+def set_line_notification_enabled(enabled: bool) -> dict:
+    """เปิด/ปิด LINE notification จาก frontend settings panel"""
+
+    return notification_service.set_enabled(enabled=enabled)
 
 
 def get_line_notification_status() -> dict:

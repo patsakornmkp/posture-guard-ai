@@ -41,7 +41,6 @@
     const POSTURE_POLL_INTERVAL = 1500;
     const ELAPSED_INTERVAL = 1000;
     const FRONTEND_ALERT_COOLDOWN = 5000;
-    const ALERT_DURATION_SECONDS = 180;
     const CONNECTION_ERROR_VISIBLE_LIMIT = 1;
 
     const CVA_NORMAL_THRESHOLD = 50;
@@ -559,8 +558,8 @@
 
                     toggle.checked = !nextEnabled;
                     desc.textContent = "อัปเดตไม่สำเร็จ";
-                    showToast("ยังไม่สามารถเปิด/ปิด LINE ได้");
-                } finally {
+                    showToast("ยังไม่สามารถเปิด/ปิด LINE ได้ แต่ระบบ Monitoring ยังทำงานต่อ");
+
                     const latest = await fetchLineStatusSafe();
 
                     if (latest) {
@@ -612,6 +611,16 @@
         }
     }
 
+    function normalizeLineStatusResponse(data) {
+        if (!data) {
+            return null;
+        }
+
+        // backend ปัจจุบันคืนรูปแบบ { success, line, message }
+        // เผื่อ backend เก่าคืน status ตรง ๆ ก็ยังรองรับได้
+        return data.line || data.status || data;
+    }
+
     async function fetchLineStatus() {
         const response = await fetch(`${utils.API_BASE}/notification/line/status`, {
             method: "GET",
@@ -620,11 +629,26 @@
             },
         });
 
+        const contentType = response.headers.get("content-type") || "";
+        const data = contentType.includes("application/json")
+            ? await response.json()
+            : null;
+
         if (!response.ok) {
-            throw new Error(`LINE status error ${response.status}`);
+            throw new Error(data?.detail || `LINE status error ${response.status}`);
         }
 
-        return response.json();
+        if (data && data.success === false) {
+            throw new Error(data.detail || data.message || "LINE status failed");
+        }
+
+        const status = normalizeLineStatusResponse(data);
+
+        if (!status) {
+            throw new Error("LINE status response is empty");
+        }
+
+        return status;
     }
 
     async function setLineEnabled(enabled) {
@@ -645,7 +669,17 @@
             throw new Error(data?.detail || `LINE update error ${response.status}`);
         }
 
-        return data;
+        if (data && data.success === false) {
+            throw new Error(data.detail || data.message || "LINE update failed");
+        }
+
+        const status = normalizeLineStatusResponse(data);
+
+        if (!status) {
+            throw new Error("LINE enabled response is empty");
+        }
+
+        return status;
     }
 
     /* =========================

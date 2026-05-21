@@ -1,108 +1,104 @@
-document.addEventListener('DOMContentLoaded', async () => {
-    const startBtn = document.getElementById('startBtn');
+/* =========================================
+   Setup Page
+   File: frontend/js/setup.js
 
-    if (!startBtn) {
-        console.error('setup.js: startBtn ไม่พบในหน้า setup.html');
+   หน้านี้ใช้เริ่ม realtime monitoring session
+   - ไม่มี Calibration / Baseline
+   - ไม่เลือกเวลาล่วงหน้า
+   - session จะทำงานจนกว่าผู้ใช้กดหยุดเอง
+========================================= */
+
+document.addEventListener("DOMContentLoaded", async () => {
+    "use strict";
+
+    if (!window.api || !window.utils) {
+        alert("ระบบ frontend โหลดไม่ครบ กรุณาตรวจสอบว่า app.js ถูกโหลดก่อน setup.js");
+        window.location.replace("login.html");
         return;
     }
 
-    let isStarting = false;
-    const defaultButtonText = '▶ เริ่มใช้งาน';
+    const canOpenSetup = await utils.requireNoActiveMonitoring();
 
-    function setStartButtonLoading(isLoading, text = 'กำลังเตรียมระบบ...') {
-        startBtn.disabled = isLoading;
-        startBtn.textContent = isLoading ? text : defaultButtonText;
-    }
-
-    function showStartError(message) {
-        alert(message);
-    }
-
-    // ล็อกปุ่มไว้ก่อน ระหว่างตรวจสอบ flow
-    setStartButtonLoading(true, 'กำลังตรวจสอบสถานะ...');
-
-    const canUseSetup = await utils.requireNoActiveMonitoring();
-
-    if (!canUseSetup) {
+    if (!canOpenSetup) {
         return;
     }
 
     const user = utils.getCurrentUser();
 
     if (!user) {
-        utils.redirectTo('login.html', { replace: true });
+        utils.redirectTo("login.html", { replace: true });
         return;
     }
 
-    // โหมด realtime = ไม่จำกัดเวลา
-    // ตั้งเป็น 0 เพื่อกันค่า plannedMinutes ค้างจาก session ก่อนหน้า
-    localStorage.setItem('plannedMinutes', '0');
+    setupUserInfo(user);
+    setupStartButton(user);
+});
 
-    setStartButtonLoading(false);
+function setupUserInfo(user) {
+    const userName = document.getElementById("userName");
+    const userLabel = user?.full_name || user?.username || "ผู้ใช้งาน";
 
-    startBtn.addEventListener('click', async () => {
-        if (isStarting) {
-            return;
-        }
+    if (userName) {
+        userName.textContent = userLabel;
+    }
+}
 
-        isStarting = true;
-        setStartButtonLoading(true, 'กำลังเริ่มระบบ...');
+function setupStartButton(user) {
+    const startBtn = document.getElementById("startBtn");
+    const setupStatus = document.getElementById("setupStatus");
+
+    if (!startBtn) {
+        return;
+    }
+
+    startBtn.disabled = false;
+
+    startBtn.addEventListener("click", async () => {
+        startBtn.disabled = true;
+        startBtn.textContent = "กำลังเริ่มระบบ...";
+
+        setStatus(setupStatus, "กำลังเปิดกล้องและเริ่ม session", "loading");
 
         try {
-            // เคลียร์ session เก่าที่อาจค้างใน backend
-            // ถ้าไม่มี session อยู่แล้ว ให้ข้าม error ได้
-            setStartButtonLoading(true, 'กำลังตรวจสอบ session เดิม...');
-
-            try {
-                await api.stopSession();
-            } catch (_) {
-                // ไม่มี session เก่า หรือ backend แจ้งว่าไม่มี session ให้ข้ามได้
-            }
-
-            // เคลียร์กล้องเก่าที่อาจค้างอยู่
-            setStartButtonLoading(true, 'กำลังเตรียมกล้อง...');
-
-            try {
-                await api.stopCamera();
-            } catch (_) {
-                // ไม่มีกล้องค้างอยู่ ให้ข้ามได้
-            }
-
-            // เริ่มกล้อง
             await api.startCamera();
 
-            // เริ่ม session แบบ realtime
-            // planned_duration_minutes = 0 หมายถึงผู้ใช้กดหยุดเอง
-            setStartButtonLoading(true, 'กำลังเริ่มการตรวจจับ...');
+            const session = await api.startSession(user.id, 0);
+            const sessionId = session?.session_id || session?.id || null;
 
-            const result = await api.startSession(user.id, 0);
+            utils.markMonitoringSessionStarted(sessionId);
 
-            if (!result || result.session_id === undefined || result.session_id === null) {
-                throw new Error('backend ไม่ได้ส่ง session_id กลับมา');
-            }
+            setStatus(setupStatus, "เริ่มระบบสำเร็จ กำลังไปหน้า Monitoring", "success");
 
-            utils.markMonitoringSessionStarted(result.session_id);
-
-            // ใช้ replace เพื่อไม่ให้ browser back กลับมาหน้า setup ระหว่าง monitoring
-            utils.redirectTo('monitoring.html', { replace: true });
+            window.location.replace("monitoring.html");
         } catch (err) {
-            // ถ้าเปิดกล้องสำเร็จบางส่วน แต่เริ่ม session ไม่สำเร็จ ให้พยายามปิดกล้องกันค้าง
+            console.error("Start monitoring failed:", err);
+
             try {
                 await api.stopCamera();
-            } catch (_) {
-                // ถ้าปิดกล้องไม่สำเร็จ ไม่ควรทำให้หน้า setup crash
+            } catch (stopErr) {
+                console.warn("Cannot stop camera after start failure:", stopErr);
             }
 
             utils.clearSessionFlowState({ keepLast: true });
 
-            showStartError(
-                'ไม่สามารถเริ่มการตรวจจับได้\n\n' +
-                'สาเหตุ: ' + err.message + '\n\n' +
-                'กรุณาตรวจสอบว่า backend เปิดอยู่ และกล้องพร้อมใช้งาน'
+            setStatus(
+                setupStatus,
+                "เริ่มระบบไม่สำเร็จ: " + err.message,
+                "error"
             );
 
-            isStarting = false;
-            setStartButtonLoading(false);
+            startBtn.disabled = false;
+            startBtn.textContent = "เริ่มตรวจจับท่านั่ง";
         }
     });
-});
+}
+
+function setStatus(element, message, type = "info") {
+    if (!element) {
+        return;
+    }
+
+    element.textContent = message;
+    element.classList.remove("is-info", "is-loading", "is-success", "is-error");
+    element.classList.add(`is-${type}`);
+}

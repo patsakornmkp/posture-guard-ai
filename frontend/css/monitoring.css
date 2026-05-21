@@ -12,7 +12,7 @@
 
 .monitoring-dashboard {
     width: 100%;
-    max-width: min(1540px, calc(100vw - 72px));
+    max-width: 1320px;
     margin: 0 auto;
     padding: 18px 24px 24px;
 }
@@ -114,20 +114,27 @@
 
 .session-grid {
     display: grid;
-    grid-template-columns: minmax(0, 1.28fr) minmax(390px, 0.72fr);
+    grid-template-columns: 600px minmax(520px, 620px);
     gap: 24px;
     align-items: start;
+    justify-content: center;
 }
 
 .video-panel {
+    width: 600px;
+    max-width: 600px;
     min-width: 0;
+
     display: flex;
     flex-direction: column;
     gap: 12px;
 }
 
 .info-panel {
+    width: 100%;
+    max-width: 620px;
     min-width: 0;
+
     display: flex;
     flex-direction: column;
     gap: 12px;
@@ -140,13 +147,14 @@
 
 .video-container {
     width: 100%;
-    min-height: 420px;
-    max-height: 510px;
-    aspect-ratio: 16 / 9.4;
+    height: 338px;
+    min-height: 0;
+    max-height: 338px;
+    aspect-ratio: 16 / 9;
 
     background: #000;
     border: 1px solid var(--border, #e5e7eb);
-    border-radius: 22px;
+    border-radius: 20px;
     overflow: hidden;
     position: relative;
 }
@@ -215,6 +223,7 @@
     background: var(--bg, #ffffff);
     border: 1px solid var(--border, #e5e7eb);
     border-radius: 16px;
+    box-sizing: border-box;
 }
 
 .timer-inline-row {
@@ -294,6 +303,7 @@
     border: 1px solid var(--accent, #1d9e75);
     text-align: center;
     background: var(--accent-bg, #e8f7f1);
+    box-sizing: border-box;
 }
 
 .status-card.is-good,
@@ -383,6 +393,7 @@
     border: 1px solid var(--border, #e5e7eb);
     border-radius: 16px;
     text-align: center;
+    box-sizing: border-box;
 }
 
 .metric-label {
@@ -430,6 +441,7 @@
     background: var(--bg, #ffffff);
     border: 1px solid var(--border, #e5e7eb);
     border-radius: 16px;
+    box-sizing: border-box;
 }
 
 .stats-heading {
@@ -526,6 +538,7 @@
     box-shadow: 0 18px 45px rgba(20, 40, 34, 0.14);
 
     animation: monitoringPanelIn 0.18s ease-out;
+    box-sizing: border-box;
 }
 
 @keyframes monitoringPanelIn {
@@ -592,11 +605,29 @@
 ========================= */
 
 .settings-panel {
-    top: 92px;
-    right: 28px;
+    left: 50%;
+    top: 50%;
     width: min(430px, calc(100vw - 36px));
+    max-height: calc(100vh - 40px);
+    overflow: auto;
+
     padding: 20px;
     border-radius: 24px;
+
+    transform: translate(-50%, -50%);
+    animation: monitoringSettingsIn 0.18s ease-out;
+}
+
+@keyframes monitoringSettingsIn {
+    from {
+        opacity: 0;
+        transform: translate(-50%, calc(-50% - 8px)) scale(0.985);
+    }
+
+    to {
+        opacity: 1;
+        transform: translate(-50%, -50%) scale(1);
+    }
 }
 
 .settings-list {
@@ -780,6 +811,7 @@
     border: 1px solid var(--border, #e5e7eb);
     border-radius: 18px;
     background: linear-gradient(180deg, #ffffff 0%, #fbfdfc 100%);
+    box-sizing: border-box;
 }
 
 .chart-svg {
@@ -827,7 +859,7 @@
    Responsive
 ========================= */
 
-@media (max-width: 1100px) {
+@media (max-width: 1180px) {
     .monitoring-dashboard {
         max-width: calc(100vw - 32px);
         padding-left: 16px;
@@ -836,6 +868,19 @@
 
     .session-grid {
         grid-template-columns: 1fr;
+        justify-content: stretch;
+    }
+
+    .video-panel {
+        width: 100%;
+        max-width: 600px;
+        margin: 0 auto;
+    }
+
+    .info-panel {
+        width: 100%;
+        max-width: 720px;
+        margin: 0 auto;
     }
 
     .monitoring-head {
@@ -854,12 +899,8 @@
     }
 
     .video-container {
-        max-height: none;
-    }
-
-    .settings-panel {
-        top: 86px;
-        right: 18px;
+        height: 338px;
+        max-height: 338px;
     }
 }
 
@@ -885,13 +926,28 @@
     }
 
     .settings-panel {
-        top: auto;
-        right: 12px;
         left: 12px;
-        bottom: 12px;
+        right: 12px;
+        top: 50%;
+        bottom: auto;
         width: auto;
         max-height: calc(100vh - 24px);
         overflow: auto;
+
+        transform: translateY(-50%);
+        animation: monitoringSettingsMobileIn 0.18s ease-out;
+    }
+
+    @keyframes monitoringSettingsMobileIn {
+        from {
+            opacity: 0;
+            transform: translateY(calc(-50% - 8px)) scale(0.985);
+        }
+
+        to {
+            opacity: 1;
+            transform: translateY(-50%) scale(1);
+        }
     }
 
     .chart-panel {
