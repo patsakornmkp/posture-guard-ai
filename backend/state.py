@@ -139,6 +139,7 @@ class SessionState:
             session_id=self.session_id,
             good_seconds=self.good_seconds,
             bad_seconds=self.bad_seconds,
+            effective_seated_seconds=self.effective_seconds,
             forward_head_seconds=self.forward_head_seconds,
             rounded_shoulder_seconds=self.rounded_shoulder_seconds,
             alert_count=self.alert_count,

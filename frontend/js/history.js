@@ -9,6 +9,7 @@
    - ไม่มีหลังคร่อม / hunched back
    - แสดงจำนวนแจ้งเตือนรวม
    - รองรับจำนวนแจ้งเตือนแยกคอยื่น / ไหล่ห่อ
+   - รองรับ effective_seated_seconds และ fallback สำหรับ session เก่า
 ========================================= */
 
 (function () {
@@ -79,12 +80,19 @@
                     0
                 );
 
-                const effective = getNumber(
+                const postureTotal = good + forward + rounded;
+
+                const rawEffective = getNumber(
                     session.effective_seated_seconds,
                     session.effective,
-                    good + forward + rounded,
                     0
                 );
+
+                const effective = rawEffective > 0
+                    ? rawEffective
+                    : postureTotal > 0
+                        ? postureTotal
+                        : 0;
 
                 const actualDuration = getNumber(
                     session.actual_duration_seconds,

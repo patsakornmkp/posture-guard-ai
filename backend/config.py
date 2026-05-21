@@ -9,6 +9,7 @@
 # - ไม่ใช้ hip landmark เป็นเงื่อนไขหลักของระบบ
 # - ใช้ marker สีเขียวเฉพาะจุดกกหู / tragus เป็นตัวช่วย
 # - แยกเวลาจับคอยื่นและไหล่ห่อ
+# - รองรับการเลือก landmark ตามฝั่งกล้อง
 # - แจ้งเตือนเมื่อผิดท่าต่อเนื่องครบ 3 นาที
 # - หากยังผิดท่าต่อเนื่อง ให้แจ้งเตือนซ้ำทุก 3 นาที
 
@@ -65,10 +66,19 @@ LANDMARK_SMOOTHING_ALPHA: float = 0.30
 # วาดเฉพาะจุดที่ใช้จริง ไม่วาด skeleton ทั้งตัว
 DRAW_FULL_BODY_SKELETON: bool = False
 
+# ฝั่งกล้องที่ใช้ถ่ายด้านข้างของผู้ใช้
+#
+# ค่าที่ใช้ได้:
+# - "right" = กล้องอยู่ด้านขวาของผู้ใช้ ใช้ RIGHT_EAR / RIGHT_SHOULDER เป็นหลัก
+# - "left"  = กล้องอยู่ด้านซ้ายของผู้ใช้ ใช้ LEFT_EAR / LEFT_SHOULDER เป็นหลัก
+# - "auto"  = ให้ detector เลือกฝั่งจาก visibility อัตโนมัติ
+#
+# ตอนนี้ตั้งเป็น "right" เพราะด้านขวาจับจุดเสถียรกว่าในการทดสอบ
+CAMERA_SIDE: str = "left"
 # ทิศทางด้านหน้าของผู้ใช้ในภาพ
 # 1  = ด้านหน้าอยู่ทางขวาของภาพ
 # -1 = ด้านหน้าอยู่ทางซ้ายของภาพ
-CAMERA_FORWARD_DIRECTION: int = 1
+CAMERA_FORWARD_DIRECTION: int = -1
 
 # ========================
 # CVA — Forward Head Posture / คอยื่น
@@ -139,12 +149,12 @@ TRAGUS_FORWARD_OFFSET_RATIO: float = 0.018
 ENABLE_GREEN_MARKER_DETECTION: bool = True
 
 # สีเขียว
-GREEN_HSV_LOWER: tuple[int, int, int] = (35, 80, 80)
-GREEN_HSV_UPPER: tuple[int, int, int] = (85, 255, 255)
+#GREEN_HSV_LOWER: tuple[int, int, int] = (35, 80, 80)
+#GREEN_HSV_UPPER: tuple[int, int, int] = (85, 255, 255)
 
 # ถ้าเปลี่ยนไปใช้สีเหลือง ให้ใช้ประมาณนี้แทน
-# GREEN_HSV_LOWER: tuple[int, int, int] = (20, 80, 80)
-# GREEN_HSV_UPPER: tuple[int, int, int] = (35, 255, 255)
+GREEN_HSV_LOWER: tuple[int, int, int] = (20, 80, 80)
+GREEN_HSV_UPPER: tuple[int, int, int] = (35, 255, 255)
 
 GREEN_MARKER_MIN_AREA: int = 40
 GREEN_MARKER_MAX_AREA: int = 10000

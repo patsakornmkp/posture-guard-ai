@@ -1,71 +1,53 @@
-let plannedMinutes = null;
-
 document.addEventListener('DOMContentLoaded', () => {
     const user = utils.requireAuth();
     if (!user) return;
 
-    const durationGroup = document.getElementById('durationGroup');
     const startBtn = document.getElementById('startBtn');
 
-    if (!durationGroup || !startBtn) {
-        console.error('setup.js: durationGroup หรือ startBtn ไม่พบในหน้า setup.html');
+    if (!startBtn) {
+        console.error('setup.js: startBtn ไม่พบในหน้า setup.html');
         return;
     }
 
-    localStorage.removeItem('plannedMinutes');
-
-    plannedMinutes = null;
-    startBtn.disabled = false;
-    startBtn.classList.add('is-waiting');
-    startBtn.textContent = 'กรุณาเลือกเวลาก่อน';
-
-    durationGroup.addEventListener('click', (e) => {
-        const btn = e.target.closest('.duration-btn');
-        if (!btn) return;
-
-        document.querySelectorAll('.duration-btn').forEach((b) => {
-            b.classList.remove('active');
-        });
-
-        btn.classList.add('active');
-        plannedMinutes = Number(btn.dataset.minutes);
-
-        startBtn.disabled = false;
-        startBtn.classList.remove('is-waiting');
-        startBtn.textContent = '▶ เริ่มการใช้งาน';
-    });
+    // โหมด realtime = ไม่จำกัดเวลา
+    // ตั้งเป็น 0 เพื่อกันไฟล์อื่นอ่านค่า plannedMinutes ค้างจาก session ก่อนหน้า
+    localStorage.setItem('plannedMinutes', '0');
 
     startBtn.addEventListener('click', async () => {
-        if (plannedMinutes === null || Number.isNaN(plannedMinutes)) {
-            alert('กรุณาเลือกระยะเวลาก่อนเริ่มใช้งาน');
-            return;
-        }
-
         startBtn.disabled = true;
         startBtn.textContent = 'กำลังเริ่ม...';
 
         try {
+            // เคลียร์ session เก่า ถ้ามีค้างอยู่
             try {
                 await api.stopSession();
             } catch (_) {}
 
+            // เคลียร์กล้องเก่า ถ้ามีค้างอยู่
             try {
                 await api.stopCamera();
             } catch (_) {}
 
+            // เริ่มกล้อง
             await api.startCamera();
 
-            const result = await api.startSession(user.id, plannedMinutes);
+            // ส่ง 0 = ไม่จำกัดเวลา / realtime mode
+            const result = await api.startSession(user.id, 0);
 
             localStorage.setItem('currentSessionId', result.session_id);
-            localStorage.setItem('plannedMinutes', String(plannedMinutes));
+            localStorage.setItem('plannedMinutes', '0');
 
             window.location.href = 'monitoring.html';
         } catch (err) {
+            // ถ้าเปิดกล้องสำเร็จแล้ว แต่เริ่ม session ไม่สำเร็จ ให้พยายามปิดกล้องกันค้าง
+            try {
+                await api.stopCamera();
+            } catch (_) {}
+
             alert('ไม่สามารถเริ่ม session ได้: ' + err.message);
 
             startBtn.disabled = false;
-            startBtn.textContent = '▶ เริ่มการใช้งาน';
+            startBtn.textContent = '▶ เริ่มใช้งาน';
         }
     });
 });

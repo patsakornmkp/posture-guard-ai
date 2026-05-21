@@ -8,6 +8,7 @@
 # - ไม่ตรวจหลังคร่อม / hunched back แล้ว
 # - รองรับ marker สีเขียวเป็นจุดหลักสำหรับ Tragus, C7, Shoulder
 # - ถ้า marker ไม่ครบ จะ fallback กลับไปใช้ MediaPipe + estimated C7
+# - เลือก landmark ตามฝั่งกล้องจาก config.CAMERA_SIDE
 # - วาด overlay ให้เห็นเส้นอ้างอิง:
 #   CVA = เส้นแนวนอนผ่าน C7 + เส้น C7 -> Tragus
 #   FSA = เส้นแนวนอนผ่านหัวไหล่ + เส้น Shoulder -> C7
@@ -182,13 +183,15 @@ class PoseDetector:
 
     def _pick_visible_side_set(self, p: dict[str, Point]) -> Optional[str]:
         """
-        เลือกฝั่งที่เห็นชัดกว่าแบบเป็นชุดเดียวกัน
+        เลือกฝั่ง landmark ที่ใช้คำนวณ CVA/FSA
 
-        ใช้เฉพาะ:
-        - ear
-        - shoulder
+        ใช้ config.CAMERA_SIDE เป็นหลัก:
+        - "left"  = ใช้ LEFT_EAR / LEFT_SHOULDER ก่อน
+        - "right" = ใช้ RIGHT_EAR / RIGHT_SHOULDER ก่อน
+        - "auto"  = เลือกฝั่งที่ visibility ดีกว่าแบบเดิม
 
-        ไม่ใช้ hip เพราะระบบตรวจเฉพาะครึ่งตัวบน
+        หากตั้ง left/right แต่ visibility ไม่ผ่านเกณฑ์
+        จะ fallback ไปใช้ auto เพื่อให้ระบบยังทำงานต่อได้
         """
 
         left_points = [
@@ -201,28 +204,62 @@ class PoseDetector:
             p["right_shoulder"],
         ]
 
+        camera_side = str(
+            getattr(config, "CAMERA_SIDE", "auto")
+        ).strip().lower()
+
+        if camera_side in ["left", "right"]:
+            selected_points = left_points if camera_side == "left" else right_points
+
+            if self._is_side_usable(selected_points):
+                return camera_side
+
+            # ถ้าฝั่งที่กำหนดไว้ไม่ผ่าน visibility
+            # ให้ fallback ไป auto แทนการ return None ทันที
+            # เพื่อกันภาพหลุดเมื่อ landmark ฝั่งนั้นหายชั่วคราว
+
         left_score = self._side_visibility_score(left_points)
         right_score = self._side_visibility_score(right_points)
 
         best_side = "left" if left_score >= right_score else "right"
         selected = left_points if best_side == "left" else right_points
-        best_score = max(left_score, right_score)
 
-        if best_score < config.MIN_VISIBILITY:
+        if not self._is_side_usable(selected):
             return None
 
-        ear, shoulder = selected
+        return best_side
+
+    def _is_side_usable(self, points: list[Point]) -> bool:
+        """
+        ตรวจว่าฝั่ง landmark ที่เลือกใช้งานได้หรือไม่
+
+        ใช้เฉพาะ:
+        - ear
+        - shoulder
+
+        ไม่ใช้ hip เพราะระบบตรวจเฉพาะครึ่งตัวบน
+        """
+
+        if len(points) < 2:
+            return False
+
+        ear, shoulder = points
 
         min_visibility = config.MIN_VISIBILITY
         ear_min_visibility = max(0.45, min_visibility - 0.1)
 
         if shoulder.visibility < min_visibility:
-            return None
+            return False
 
         if ear.visibility < ear_min_visibility:
-            return None
+            return False
 
-        return best_side
+        side_score = self._side_visibility_score(points)
+
+        if side_score < min_visibility:
+            return False
+
+        return True
 
     def _side_visibility_score(self, points: list[Point]) -> float:
         return sum(point.visibility for point in points) / len(points)

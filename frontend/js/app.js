@@ -6,7 +6,8 @@
    - ไฟล์นี้เป็นตัวกลางสำหรับเรียก API backend
    - ไม่ได้คำนวณ CVA/FSA
    - ไม่ได้ควบคุมเวลานั่งผิดก่อนแจ้งเตือน
-   - เวลาแจ้งเตือน 3 นาทีอยู่ที่ backend/config.py
+   - เวลาแจ้งเตือนอยู่ที่ backend/config.py
+   - realtime mode ใช้ planned_duration_minutes = 0
 ========================================= */
 
 // ห่อทั้งหมดด้วย IIFE + guard เพื่อไม่ให้ define ซ้ำ
@@ -102,9 +103,9 @@
         },
 
         // Session
-        // plannedMinutes = ระยะเวลา session ที่ผู้ใช้เลือก เช่น 15 / 30 / 60 นาที
+        // plannedMinutes = 0 หมายถึง realtime mode / ไม่จำกัดเวลา
         // ไม่ใช่เวลานั่งผิดก่อนแจ้งเตือน
-        startSession(userId, plannedMinutes = 30) {
+        startSession(userId, plannedMinutes = 0) {
             return apiRequest('POST', '/session/start', {
                 user_id: userId,
                 planned_duration_minutes: plannedMinutes,

@@ -10,7 +10,7 @@
 # - ใช้ CVA สำหรับภาวะคอยื่น
 # - ใช้ FSA สำหรับภาวะไหล่ห่อ
 # - ลบ field หลังคร่อม / kyphosis / hunched back ออกจาก response หลัก
-# - default session duration = 30 นาที
+# - realtime session mode: ไม่กำหนดเวลาล่วงหน้า
 # - เวลาแจ้งเตือนเมื่อผิดท่าต่อเนื่อง 3 นาที อยู่ใน config.py
 # - ส่งค่า timer/alert แยกคอยื่นและไหล่ห่อออกไปที่ /posture/current
 # - เพิ่มจำนวนแจ้งเตือนแยกตามสาเหตุ:
@@ -447,11 +447,11 @@ def start_session(payload: dict):
     payload:
     {
         "user_id": 1,
-        "planned_duration_minutes": 30
+        "planned_duration_minutes": 0
     }
     """
     user_id = payload.get("user_id")
-    planned = payload.get("planned_duration_minutes", 30)
+    planned = payload.get("planned_duration_minutes", 0)
 
     if user_id is None:
         raise HTTPException(

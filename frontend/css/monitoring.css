@@ -1,6 +1,12 @@
 /* =========================
    Monitoring Page
    File: frontend/css/monitoring.css
+
+   ใช้กับ monitoring.html เวอร์ชัน realtime
+   - กล้องซ้าย
+   - ข้อมูลขวา
+   - เวลาใช้งานอยู่ใต้กล้อง
+   - ปุ่มแจ้งเตือนเสียง/ข้อความอยู่บรรทัดเดียวกับเวลา
 ========================= */
 
 .monitoring-dashboard {
@@ -13,6 +19,7 @@
 .active-session {
     position: relative;
 }
+
 
 /* =========================
    Header
@@ -54,9 +61,11 @@
     background: var(--bg-alt);
     border: 1px solid var(--border);
     color: var(--muted);
+
     display: inline-flex;
     align-items: center;
     justify-content: center;
+
     font-size: 12px;
     font-weight: 800;
     white-space: nowrap;
@@ -83,14 +92,15 @@
     white-space: nowrap;
 }
 
+
 /* =========================
    Layout
 ========================= */
 
 .session-grid {
     display: grid;
-    grid-template-columns: minmax(0, 1.18fr) minmax(390px, 0.82fr);
-    gap: 22px;
+    grid-template-columns: minmax(0, 1.24fr) minmax(390px, 0.76fr);
+    gap: 20px;
     align-items: start;
 }
 
@@ -107,12 +117,13 @@
     gap: 10px;
 }
 
+
 /* =========================
    Camera
 ========================= */
 
 .video-container {
-    width: min(100%, 560px);
+    width: min(100%, 620px);
     aspect-ratio: 4 / 3;
     background: #000;
     border: 1px solid var(--border);
@@ -132,14 +143,18 @@
     position: absolute;
     left: 14px;
     top: 14px;
+
     height: 32px;
     padding: 0 12px;
     border-radius: 999px;
+
     display: inline-flex;
     align-items: center;
     gap: 8px;
+
     background: rgba(0, 0, 0, 0.56);
     color: #ffffff;
+
     font-size: 12px;
     font-weight: 800;
 }
@@ -169,78 +184,57 @@
     }
 }
 
+
 /* =========================
-   Timer
+   Timer + Alert Toggles
 ========================= */
 
 .session-timer-card {
-    width: min(100%, 560px);
+    width: min(100%, 620px);
     padding: 12px 14px;
     background: var(--bg);
     border: 1px solid var(--border);
     border-radius: 16px;
 }
 
-.timer-main {
+.timer-inline-row {
     display: flex;
-    align-items: flex-end;
+    align-items: center;
     justify-content: space-between;
-    gap: 16px;
+    gap: 14px;
+}
+
+.timer-usage-inline {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    flex: 0 0 auto;
+    min-width: 175px;
 }
 
 .timer-label {
-    display: block;
-    margin-bottom: 3px;
-    font-size: 12px;
+    display: inline-block;
+    margin: 0;
     color: var(--muted);
-}
-
-.timer-line {
-    display: flex;
-    align-items: baseline;
-    gap: 8px;
+    font-size: 12px;
+    white-space: nowrap;
 }
 
 .timer-value {
+    color: var(--fg);
     font-size: 24px;
     font-weight: 800;
     font-variant-numeric: tabular-nums;
-    color: var(--fg);
+    white-space: nowrap;
 }
 
-.timer-planned {
-    font-size: 14px;
-    color: var(--dim);
+.timer-action-group {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(150px, 1fr));
+    gap: 10px;
+    flex: 1;
 }
 
-.timer-remaining {
-    text-align: right;
-}
-
-.timer-remaining strong {
-    display: block;
-    font-size: 18px;
-    font-weight: 800;
-    font-variant-numeric: tabular-nums;
-    color: var(--accent);
-}
-
-.session-progress {
-    margin-top: 10px;
-    height: 9px;
-    border-radius: 999px;
-    background: var(--bg-alt);
-    border: 1px solid var(--border);
-    overflow: hidden;
-}
-
-.session-progress-bar {
-    width: 0%;
-    height: 100%;
-    border-radius: 999px;
-    background: var(--accent);
-    transition: width 0.4s ease;
-}
 
 /* =========================
    Status Card
@@ -309,6 +303,7 @@
     color: #555;
 }
 
+
 /* =========================
    Metrics
 ========================= */
@@ -359,6 +354,7 @@
     color: var(--muted);
     font-size: 10.5px;
 }
+
 
 /* =========================
    Session Stats
@@ -412,15 +408,10 @@
     font-variant-numeric: tabular-nums;
 }
 
-/* =========================
-   Alert Toggles
-========================= */
 
-.action-group {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 10px;
-}
+/* =========================
+   Toggle Cards
+========================= */
 
 .sound-toggle-card,
 .notify-toggle-card {
@@ -430,9 +421,11 @@
     background: var(--bg);
     border: 1px solid var(--border);
     border-radius: 16px;
+
     display: flex;
     align-items: center;
     gap: 10px;
+
     cursor: pointer;
     transition: border-color 0.2s, background 0.2s;
 }
@@ -465,9 +458,11 @@
     height: 18px;
     border-radius: 50%;
     background: white;
+
     position: absolute;
     top: 2px;
     left: 2px;
+
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.22);
     transition: transform 0.2s;
 }
@@ -504,6 +499,7 @@
     line-height: 1.2;
 }
 
+
 /* =========================
    Responsive
 ========================= */
@@ -535,6 +531,23 @@
     }
 }
 
+@media (max-width: 720px) {
+    .timer-inline-row {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .timer-usage-inline {
+        width: 100%;
+        justify-content: space-between;
+        min-width: 0;
+    }
+
+    .timer-action-group {
+        grid-template-columns: 1fr;
+    }
+}
+
 @media (max-width: 560px) {
     .monitoring-dashboard {
         max-width: 100%;
@@ -551,19 +564,5 @@
 
     .metrics {
         grid-template-columns: 1fr;
-    }
-
-    .action-group {
-        grid-template-columns: 1fr;
-    }
-
-    .timer-main {
-        align-items: flex-start;
-        flex-direction: column;
-    }
-
-    .timer-remaining {
-        width: 100%;
-        text-align: left;
     }
 }

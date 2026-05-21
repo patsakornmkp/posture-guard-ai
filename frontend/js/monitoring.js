@@ -2,13 +2,16 @@
    Monitoring Page
    File: frontend/js/monitoring.js
 
-   เวอร์ชันใหม่:
+   เวอร์ชันใหม่ (realtime mode):
    - ใช้ CVA สำหรับคอยื่น
    - ใช้ FSA สำหรับไหล่ห่อ
    - ไม่มี warning / เฝ้าระวัง
    - ไม่มีหลังคร่อม / hunched back
-   - แจ้งเตือนเฉพาะเมื่อ backend ส่ง alert = true
+   - แจ้งเตือนเมื่อ backend ส่ง alert = true
+   - แจ้งเตือนเพิ่มเมื่อ alert_active เปลี่ยนจาก false เป็น true
    - แสดงจำนวนแจ้งเตือนแยกคอยื่น / ไหล่ห่อ / รวม
+   - ไม่มี planned duration / auto-stop — ผู้ใช้กดหยุดเอง
+   - หยุดนับเวลาใช้งานเมื่อไม่พบผู้ใช้งานในกล้อง
 ========================================= */
 
 (function () {
@@ -18,21 +21,30 @@
     let pollInterval = null;
     let elapsedInterval = null;
 
-    let startTime = Date.now();
     let notificationEnabled = false;
-    let plannedSeconds = 0;
     let sessionEnded = false;
 
     let notificationPermissionAsked = false;
     let lastFrontendAlertTime = 0;
     let videoFrameLoading = false;
 
+    // จำสถานะ alert active รอบก่อนหน้า
+    // ใช้กันกรณี frontend polling พลาดจังหวะ alert=true จาก backend
+    let lastForwardHeadAlertActive = false;
+    let lastRoundedShoulderAlertActive = false;
+
+    // เวลาที่แสดงบนหน้า monitoring
+    // ใช้ backend เป็นแหล่งอ้างอิงหลัก และให้ frontend ช่วยเดินเวลาให้ดู smooth
+    let displayedElapsedSeconds = 0;
+    let elapsedCountingActive = false;
+    let lastElapsedTick = null;
+
     const VIDEO_FRAME_INTERVAL = 700;
     const POSTURE_POLL_INTERVAL = 1500;
     const TIMER_INTERVAL = 1000;
 
     // กันแจ้งเตือนซ้ำจาก frontend กรณี polling เด้งรอบเดียวกัน
-    // backend เป็นตัวคุมการเตือนซ้ำทุก 3 นาที
+    // backend เป็นตัวคุมการเตือนซ้ำหลัก
     const FRONTEND_ALERT_COOLDOWN = 5000;
 
     const $ = (id) => document.getElementById(id);
@@ -41,23 +53,26 @@
         const user = utils.requireAuth();
         if (!user) return;
 
-        const plannedMinutes = parseInt(
-            localStorage.getItem("plannedMinutes") || "30",
-            10
-        );
+        displayedElapsedSeconds = 0;
+        elapsedCountingActive = false;
+        lastElapsedTick = Date.now();
 
-        plannedSeconds = plannedMinutes * 60;
-        startTime = Date.now();
+        lastForwardHeadAlertActive = false;
+        lastRoundedShoulderAlertActive = false;
 
-        setText("plannedTime", formatTime(plannedSeconds));
-        setText("remainingTime", formatTime(plannedSeconds));
+        // realtime mode: ไม่จำกัดเวลา
+        // plannedTime / remainingTime อาจไม่มีใน HTML แล้ว
+        // setText มี guard จึงไม่ทำให้หน้า error
+        setText("plannedTime", "ไม่จำกัด");
+        setText("remainingTime", "Realtime");
+        setText("elapsedTime", formatTime(displayedElapsedSeconds));
 
         setupVideoStatus();
         setupNotificationToggle();
 
         const stopBtn = $("stopBtn");
         if (stopBtn) {
-            stopBtn.addEventListener("click", () => stopSession(false));
+            stopBtn.addEventListener("click", () => stopSession());
         }
 
         startPolling();
@@ -261,13 +276,98 @@
             const posture = await api.getCurrentPosture();
             const summary = await api.getSessionSummary();
 
+            updateElapsedCountingState(posture || {});
             renderPosture(posture || {});
             renderStats(summary || {});
             handleAlertEvent(posture || {});
         } catch (err) {
             console.error("polling error:", err);
+            pauseElapsedTimer();
             renderConnectionError();
         }
+    }
+
+    /* =========================
+       Elapsed Time Control
+    ========================= */
+
+    function updateElapsedCountingState(posture) {
+        const shouldCount = shouldCountElapsedTime(posture);
+
+        if (elapsedCountingActive === shouldCount) {
+            return;
+        }
+
+        elapsedCountingActive = shouldCount;
+        lastElapsedTick = Date.now();
+    }
+
+    function shouldCountElapsedTime(posture) {
+        const status = posture.status || "no_person_detected";
+
+        // นับเวลาเฉพาะตอนระบบตรวจเจอผู้ใช้งานจริง
+        // good = อยู่ในกล้องและท่าปกติ
+        // bad = อยู่ในกล้องแต่ท่าผิด
+        return status === "good" || status === "bad";
+    }
+
+    function pauseElapsedTimer() {
+        elapsedCountingActive = false;
+        lastElapsedTick = Date.now();
+    }
+
+    function syncElapsedTimeFromSummary(summary) {
+        const backendEffectiveSeconds = Number(summary.effective_seated_seconds);
+
+        if (!Number.isFinite(backendEffectiveSeconds) || backendEffectiveSeconds < 0) {
+            return;
+        }
+
+        /*
+           ใช้ backend เป็นแหล่งอ้างอิงหลัก แต่ไม่ยอมให้เวลาบนหน้าเด้งถอยหลัง
+
+           เหตุผล:
+           - frontend เดินเวลาเองทุก 1 วินาทีเพื่อให้ UI ดูลื่น
+           - backend ส่งค่า effective_seated_seconds กลับมาเป็นรอบ ๆ
+           - ถ้า sync แบบทับค่าทุกครั้ง เวลาอาจเด้ง/กระตุก
+        */
+        if (backendEffectiveSeconds > displayedElapsedSeconds) {
+            displayedElapsedSeconds = backendEffectiveSeconds;
+        }
+
+        lastElapsedTick = Date.now();
+        setText("elapsedTime", formatTime(displayedElapsedSeconds));
+    }
+
+    function updateElapsedTime() {
+        if (sessionEnded) return;
+
+        const now = Date.now();
+
+        if (!lastElapsedTick) {
+            lastElapsedTick = now;
+        }
+
+        if (!elapsedCountingActive) {
+            lastElapsedTick = now;
+            setText("elapsedTime", formatTime(displayedElapsedSeconds));
+            return;
+        }
+
+        const delta = (now - lastElapsedTick) / 1000;
+        lastElapsedTick = now;
+
+        /*
+           ป้องกันเวลาเดินแปลกเมื่อ browser หน่วง / tab ถูกพัก / เครื่องกระตุก
+
+           ถ้า delta ใหญ่ผิดปกติ ไม่บวกเวลาพรวดเดียว
+           เพราะเวลาที่ถูกต้องจะถูก sync จาก backend ในรอบ polling ถัดไป
+        */
+        if (delta > 0 && delta <= 5) {
+            displayedElapsedSeconds += delta;
+        }
+
+        setText("elapsedTime", formatTime(displayedElapsedSeconds));
     }
 
     /* =========================
@@ -277,8 +377,45 @@
     function handleAlertEvent(posture) {
         const now = Date.now();
 
-        // แจ้งเตือนเฉพาะตอน backend ส่ง alert = true เท่านั้น
-        if (posture.alert !== true) return;
+        const forwardHeadAlert = posture.forward_head_alert === true;
+        const roundedShoulderAlert = posture.rounded_shoulder_alert === true;
+
+        const forwardHeadAlertActive = posture.forward_head_alert_active === true;
+        const roundedShoulderAlertActive = posture.rounded_shoulder_alert_active === true;
+
+        const directAlert = (
+            posture.alert === true
+            || forwardHeadAlert
+            || roundedShoulderAlert
+        );
+
+        const becameForwardHeadActive = (
+            forwardHeadAlertActive
+            && !lastForwardHeadAlertActive
+        );
+
+        const becameRoundedShoulderActive = (
+            roundedShoulderAlertActive
+            && !lastRoundedShoulderAlertActive
+        );
+
+        // อัปเดต snapshot ทุกครั้ง เพื่อให้รู้ว่ารอบหน้าเป็นการเปลี่ยนสถานะจริงไหม
+        lastForwardHeadAlertActive = forwardHeadAlertActive;
+        lastRoundedShoulderAlertActive = roundedShoulderAlertActive;
+
+        /*
+           แจ้งเตือนเมื่อ:
+           1) backend ส่ง alert=true โดยตรง
+           2) backend ส่ง forward_head_alert / rounded_shoulder_alert
+           3) frontend พลาด alert=true แต่เห็น alert_active เปลี่ยนจาก false เป็น true
+        */
+        const shouldNotify = (
+            directAlert
+            || becameForwardHeadActive
+            || becameRoundedShoulderActive
+        );
+
+        if (!shouldNotify) return;
 
         if (now - lastFrontendAlertTime < FRONTEND_ALERT_COOLDOWN) {
             return;
@@ -379,32 +516,12 @@
         const forwardHeadAlertCount = Number(s.forward_head_alert_count || 0);
         const roundedShoulderAlertCount = Number(s.rounded_shoulder_alert_count || 0);
 
+        syncElapsedTimeFromSummary(s);
+
         setText("goodTime", formatTime(s.good_posture_seconds || 0));
         setText("forwardHeadAlertCount", `${forwardHeadAlertCount} ครั้ง`);
         setText("roundedShoulderAlertCount", `${roundedShoulderAlertCount} ครั้ง`);
         setText("alertCount", `${totalAlertCount} ครั้ง`);
-    }
-
-    function updateElapsedTime() {
-        if (sessionEnded) return;
-
-        const elapsed = Math.floor((Date.now() - startTime) / 1000);
-        const remaining = Math.max(plannedSeconds - elapsed, 0);
-        const progress = plannedSeconds > 0
-            ? Math.min((elapsed / plannedSeconds) * 100, 100)
-            : 0;
-
-        setText("elapsedTime", formatTime(elapsed));
-        setText("remainingTime", formatTime(remaining));
-
-        const bar = $("sessionProgressBar");
-        if (bar) {
-            bar.style.width = `${progress}%`;
-        }
-
-        if (plannedSeconds > 0 && elapsed >= plannedSeconds) {
-            stopSession(true);
-        }
     }
 
     /* =========================
@@ -414,11 +531,17 @@
     function buildPostureAlertMessage(posture) {
         const issues = [];
 
-        if (posture.forward_head_alert === true) {
+        if (
+            posture.forward_head_alert === true
+            || posture.forward_head_alert_active === true
+        ) {
             issues.push("คอยื่นต่อเนื่องเกินเวลาที่กำหนด");
         }
 
-        if (posture.rounded_shoulder_alert === true) {
+        if (
+            posture.rounded_shoulder_alert === true
+            || posture.rounded_shoulder_alert_active === true
+        ) {
             issues.push("ไหล่ห่อต่อเนื่องเกินเวลาที่กำหนด");
         }
 
@@ -509,18 +632,17 @@
        Stop Session
     ========================= */
 
-    async function stopSession(isAutoStop = false) {
+    async function stopSession() {
         if (sessionEnded) return;
 
         sessionEnded = true;
+        pauseElapsedTimer();
 
         const stopBtn = $("stopBtn");
 
         if (stopBtn) {
             stopBtn.disabled = true;
-            stopBtn.textContent = isAutoStop
-                ? "ครบเวลา กำลังสรุปผล..."
-                : "กำลังหยุด...";
+            stopBtn.textContent = "กำลังหยุด...";
         }
 
         try {
@@ -532,13 +654,15 @@
 
             const sessionId = localStorage.getItem("currentSessionId");
 
-            try {
-                await api.stopSession();
-            } catch (_) { }
+            // สำคัญ:
+            // stop session ต้องสำเร็จก่อน จึงค่อยไปหน้า summary
+            // เพื่อให้ backend บันทึก end_time / summary / history ถูกต้อง
+            await api.stopSession();
 
+            // stop camera ถ้าพลาด ไม่ควรทำให้ข้อมูล session หาย
             try {
                 await api.stopCamera();
-            } catch (_) { }
+            } catch (_) {}
 
             localStorage.setItem("lastSessionId", sessionId || "");
             window.location.href = "summary.html";

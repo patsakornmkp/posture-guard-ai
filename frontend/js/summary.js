@@ -44,7 +44,6 @@ function renderSummary(summary) {
     renderScore(score);
 
     renderOverview({
-        total,
         effective,
         issuePct,
         alerts,
@@ -86,19 +85,21 @@ function renderSummary(summary) {
 
 function calculateScore({ totalSeconds, effectiveSeconds, alerts }) {
     /*
-       สูตรคะแนนใหม่:
+       สูตรคะแนน:
 
-       จำนวนแจ้งเตือนสูงสุด = ระยะเวลาใช้งานทั้งหมด / 180 วินาที
+       จำนวนแจ้งเตือนสูงสุด = เวลาที่ใช้งานจริง / 180 วินาที
        คะแนน = 100 - ((จำนวนแจ้งเตือนจริง / จำนวนแจ้งเตือนสูงสุด) * 60)
        คะแนนสุดท้าย = max(40, คะแนน)
 
        หมายเหตุ:
+       - ใช้ effectiveSeconds ก่อน เพื่อให้คะแนนอิงเฉพาะเวลาที่ผู้ใช้อยู่ในกล้องจริง
+       - ถ้า effectiveSeconds ไม่มีค่า จะ fallback ไปใช้ totalSeconds
        - 180 วินาที = 3 นาที
        - 60 คือคะแนนหักสูงสุด
        - ถ้านั่งผิดตลอดทั้ง session คะแนนจะลดจาก 100 เหลือ 40
     */
 
-    const durationSeconds = Number(totalSeconds || effectiveSeconds || 0);
+    const durationSeconds = Number(effectiveSeconds || totalSeconds || 0);
     const alertCount = Number(alerts || 0);
 
     if (durationSeconds <= 0) {
@@ -129,7 +130,6 @@ function renderDate() {
 }
 
 function renderOverview({
-    total,
     effective,
     issuePct,
     alerts,
@@ -137,7 +137,6 @@ function renderOverview({
     roundedAlerts,
     riskLevel,
 }) {
-    setText("sumDuration", formatTime(total));
     setText("sumEffective", formatTime(effective));
     setText("sumIssueRatio", `${issuePct.toFixed(0)}%`);
 
@@ -253,13 +252,13 @@ function renderInsight({
 
     if (forwardAlerts > roundedAlerts && forwardAlerts > 0) {
         title.textContent = "แจ้งเตือนคอยื่นเป็นหลัก";
-        desc.textContent = `ระบบแจ้งเตือนคอยื่น ${forwardAlerts} ครั้ง โดยค่ามุมคอไม่อยู่ในเกณฑ์ปกติประมาณ ${forwardPct.toFixed(0)}% ของเวลานั่งจริง ควรปรับหน้าจอให้อยู่ระดับสายตาและดึงคางกลับเป็นระยะ`;
+        desc.textContent = `ระบบแจ้งเตือนคอยื่น ${forwardAlerts} ครั้ง โดยค่ามุมคอไม่อยู่ในเกณฑ์ปกติประมาณ ${forwardPct.toFixed(0)}% ของเวลาที่ใช้งานจริง ควรปรับหน้าจอให้อยู่ระดับสายตาและดึงคางกลับเป็นระยะ`;
         return;
     }
 
     if (roundedAlerts > forwardAlerts && roundedAlerts > 0) {
         title.textContent = "แจ้งเตือนไหล่ห่อเป็นหลัก";
-        desc.textContent = `ระบบแจ้งเตือนไหล่ห่อ ${roundedAlerts} ครั้ง โดยค่ามุมไหล่ไม่อยู่ในเกณฑ์ปกติประมาณ ${roundedPct.toFixed(0)}% ของเวลานั่งจริง ควรดึงหัวไหล่กลับ เปิดอก และจัดตำแหน่งไหล่ให้เหมาะสม`;
+        desc.textContent = `ระบบแจ้งเตือนไหล่ห่อ ${roundedAlerts} ครั้ง โดยค่ามุมไหล่ไม่อยู่ในเกณฑ์ปกติประมาณ ${roundedPct.toFixed(0)}% ของเวลาที่ใช้งานจริง ควรดึงหัวไหล่กลับ เปิดอก และจัดตำแหน่งไหล่ให้เหมาะสม`;
         return;
     }
 
@@ -271,13 +270,13 @@ function renderInsight({
 
     if (forward > rounded * 1.2) {
         title.textContent = "พบค่ามุมคอไม่อยู่ในเกณฑ์ปกติเป็นหลัก";
-        desc.textContent = `ค่ามุมคอไม่อยู่ในเกณฑ์ปกติประมาณ ${forwardPct.toFixed(0)}% ของเวลานั่งจริง แต่ยังไม่มีการแจ้งเตือน อาจเป็นเพราะยังไม่ผิดท่าต่อเนื่องครบเวลาที่กำหนด`;
+        desc.textContent = `ค่ามุมคอไม่อยู่ในเกณฑ์ปกติประมาณ ${forwardPct.toFixed(0)}% ของเวลาที่ใช้งานจริง แต่ยังไม่มีการแจ้งเตือน อาจเป็นเพราะยังไม่ผิดท่าต่อเนื่องครบเวลาที่กำหนด`;
         return;
     }
 
     if (rounded > forward * 1.2) {
         title.textContent = "พบค่ามุมไหล่ไม่อยู่ในเกณฑ์ปกติเป็นหลัก";
-        desc.textContent = `ค่ามุมไหล่ไม่อยู่ในเกณฑ์ปกติประมาณ ${roundedPct.toFixed(0)}% ของเวลานั่งจริง แต่ยังไม่มีการแจ้งเตือน อาจเป็นเพราะยังไม่ผิดท่าต่อเนื่องครบเวลาที่กำหนด`;
+        desc.textContent = `ค่ามุมไหล่ไม่อยู่ในเกณฑ์ปกติประมาณ ${roundedPct.toFixed(0)}% ของเวลาที่ใช้งานจริง แต่ยังไม่มีการแจ้งเตือน อาจเป็นเพราะยังไม่ผิดท่าต่อเนื่องครบเวลาที่กำหนด`;
         return;
     }
 

@@ -6,6 +6,8 @@
 # - ใช้ FSA สำหรับภาวะไหล่ห่อ
 # - ลบ warning_seconds ออกจาก schema และ logic หลัก
 # - ลบการใช้งาน hunched_back / หลังคร่อม ออกจาก logic หลัก
+# - เพิ่มเวลาที่ตรวจเจอผู้ใช้งานจริง:
+#   effective_seated_seconds
 # - เพิ่มจำนวนแจ้งเตือนแยกตามสาเหตุ:
 #   forward_head_alert_count
 #   rounded_shoulder_alert_count
@@ -67,6 +69,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 
     good_seconds REAL DEFAULT 0,
     bad_seconds REAL DEFAULT 0,
+    effective_seated_seconds REAL DEFAULT 0,
 
     forward_head_seconds REAL DEFAULT 0,
     rounded_shoulder_seconds REAL DEFAULT 0,
@@ -139,6 +142,13 @@ def init_database() -> None:
     """
     with get_connection() as conn:
         conn.executescript(SCHEMA_SQL)
+
+        _add_column_if_missing(
+            conn,
+            table_name="sessions",
+            column_name="effective_seated_seconds",
+            column_definition="REAL DEFAULT 0",
+        )
 
         _add_column_if_missing(
             conn,
@@ -253,6 +263,7 @@ def close_session(
     risk_level: str,
     forward_head_alert_count: int = 0,
     rounded_shoulder_alert_count: int = 0,
+    effective_seated_seconds: float = 0.0,
 ) -> None:
     """
     ปิด session และบันทึกสรุปผล
@@ -260,6 +271,7 @@ def close_session(
     ระบบใหม่ใช้:
     - good_seconds = เวลาที่นับเป็นท่าทางเหมาะสม
     - bad_seconds = เวลาหลังมี alert active แล้ว
+    - effective_seated_seconds = เวลาที่ตรวจเจอผู้ใช้งานจริงในกล้อง
     - forward_head_seconds = เวลาคอยื่นหลังแจ้งเตือนแล้ว
     - rounded_shoulder_seconds = เวลาไหล่ห่อหลังแจ้งเตือนแล้ว
     - alert_count = จำนวนแจ้งเตือนรวม
@@ -273,6 +285,7 @@ def close_session(
             SET end_time = CURRENT_TIMESTAMP,
                 good_seconds = ?,
                 bad_seconds = ?,
+                effective_seated_seconds = ?,
                 forward_head_seconds = ?,
                 rounded_shoulder_seconds = ?,
                 alert_count = ?,
@@ -284,6 +297,7 @@ def close_session(
             (
                 good_seconds,
                 bad_seconds,
+                effective_seated_seconds,
                 forward_head_seconds,
                 rounded_shoulder_seconds,
                 alert_count,

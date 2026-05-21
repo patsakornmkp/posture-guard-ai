@@ -52,23 +52,45 @@
                     </div>
 
                     <div class="session-timer-card">
-                        <div class="timer-main">
-                            <div>
+                        <div class="timer-inline-row">
+
+                            <div class="timer-usage-inline">
                                 <span class="timer-label">เวลาที่ใช้งาน</span>
-                                <div class="timer-line">
-                                    <span class="timer-value" id="elapsedTime">00:00</span>
-                                    <span class="timer-planned">/ <span id="plannedTime">30:00</span></span>
-                                </div>
+                                <span class="timer-value" id="elapsedTime">00:00</span>
                             </div>
 
-                            <div class="timer-remaining">
-                                <span class="timer-label">เวลาคงเหลือ</span>
-                                <strong id="remainingTime">30:00</strong>
-                            </div>
-                        </div>
+                            <div class="timer-action-group">
 
-                        <div class="session-progress">
-                            <div class="session-progress-bar" id="sessionProgressBar"></div>
+                                <!-- Sound Notification -->
+                                <label class="sound-toggle-card compact-toggle-card">
+                                    <input type="checkbox" id="speechToggleBtn" class="sound-toggle-input">
+
+                                    <span class="sound-toggle-switch">
+                                        <span class="sound-toggle-knob"></span>
+                                    </span>
+
+                                    <div class="sound-toggle-text">
+                                        <div class="sound-title">แจ้งเตือนเสียง</div>
+                                        <div class="sound-desc" id="soundDesc">ปิดอยู่</div>
+                                    </div>
+                                </label>
+
+                                <!-- Browser Notification -->
+                                <label class="notify-toggle-card compact-toggle-card">
+                                    <input type="checkbox" id="notifyToggleBtn" class="notify-toggle-input">
+
+                                    <span class="notify-toggle-switch">
+                                        <span class="notify-toggle-knob"></span>
+                                    </span>
+
+                                    <div class="notify-toggle-text">
+                                        <div class="notify-title">แจ้งเตือนข้อความ</div>
+                                        <div class="notify-desc" id="notifyDesc">กดเพื่อเปิด</div>
+                                    </div>
+                                </label>
+
+                            </div>
+
                         </div>
                     </div>
                 </section>
@@ -132,34 +154,6 @@
                         </div>
                     </div>
 
-                    <div class="action-group">
-                        <label class="sound-toggle-card">
-                            <input type="checkbox" id="speechToggleBtn" class="sound-toggle-input">
-
-                            <span class="sound-toggle-switch">
-                                <span class="sound-toggle-knob"></span>
-                            </span>
-
-                            <div class="sound-toggle-text">
-                                <div class="sound-title">การแจ้งเตือนเสียง</div>
-                                <div class="sound-desc" id="soundDesc">ปิดอยู่</div>
-                            </div>
-                        </label>
-
-                        <label class="notify-toggle-card">
-                            <input type="checkbox" id="notifyToggleBtn" class="notify-toggle-input">
-
-                            <span class="notify-toggle-switch">
-                                <span class="notify-toggle-knob"></span>
-                            </span>
-
-                            <div class="notify-toggle-text">
-                                <div class="notify-title">การแจ้งเตือนข้อความ</div>
-                                <div class="notify-desc" id="notifyDesc">เปิดอยู่</div>
-                            </div>
-                        </label>
-                    </div>
-
                 </aside>
             </div>
         </section>
@@ -169,8 +163,8 @@
 
     <script src="../js/app.js"></script>
     <script src="../js/layout.js"></script>
-    <script src="../js/monitoring.js"></script>
     <script src="../js/alert-speech.js"></script>
+    <script src="../js/monitoring.js"></script>
 </body>
 
 </html>
