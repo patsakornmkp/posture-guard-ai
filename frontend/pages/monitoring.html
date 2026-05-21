@@ -17,151 +17,120 @@
     <div id="header"></div>
 
     <main class="dashboard monitoring-dashboard">
-        <section class="monitoring-shell" id="activeSession">
+        <section class="active-session" id="activeSession">
 
-            <header class="monitoring-hero">
-                <div class="hero-copy">
-                    <span class="hero-kicker">Realtime Monitoring</span>
-                    <h2 class="monitoring-title">กำลังตรวจจับท่าทางส่วนบน</h2>
+            <div class="monitoring-head">
+                <div>
+                    <h2 class="monitoring-title">กำลังตรวจจับท่าทาง</h2>
                     <p class="monitoring-subtitle">
-                        ระบบวิเคราะห์มุม CVA สำหรับคอยื่น และ FSA สำหรับไหล่ห่อแบบ realtime
-                        พร้อมแจ้งเตือนเมื่อผิดท่าต่อเนื่องครบเวลาที่กำหนด
+                        ระบบจะแสดงสถานะปัจจุบัน พร้อมคำแนะนำเมื่อค่ามุมไม่อยู่ในเกณฑ์ปกติ
                     </p>
-
-                    <div class="threshold-row" aria-label="เกณฑ์การประเมิน">
-                        <span class="threshold-chip">CVA ปกติ ≥ 50°</span>
-                        <span class="threshold-chip">FSA ปกติ ≥ 54°</span>
-                        <span class="threshold-chip">Alert หลังผิดท่าต่อเนื่อง 3 นาที</span>
-                    </div>
                 </div>
 
-                <div class="hero-actions">
-                    <div class="camera-chip" id="cameraStatus">กำลังเชื่อมต่อกล้อง...</div>
+                <div class="monitoring-head-actions">
+                    <div class="camera-chip" id="cameraStatus">
+                        กำลังเชื่อมต่อกล้อง...
+                    </div>
+
                     <button class="btn-danger monitoring-stop-btn" id="stopBtn" type="button">
                         ⏹ หยุดการใช้งาน
                     </button>
                 </div>
-            </header>
+            </div>
 
-            <div class="monitoring-grid">
+            <div class="session-grid">
 
                 <!-- LEFT: CAMERA -->
-                <section class="camera-panel" aria-label="ภาพจากกล้อง">
-                    <div class="video-card">
-                        <div class="video-container">
-                            <img id="videoFeed" alt="Camera feed" class="video-img">
+                <section class="video-panel">
+                    <div class="video-container">
+                        <img id="videoFeed" alt="Camera feed" class="video-img">
 
-                            <div class="video-overlay">
-                                <span class="live-dot"></span>
-                                Live Camera
-                            </div>
+                        <div class="video-overlay">
+                            <span class="live-dot"></span>
+                            Live Camera
                         </div>
                     </div>
 
-                    <div class="control-panel">
-                        <div class="elapsed-card">
-                            <span class="control-label">เวลาที่ใช้งานจริง</span>
-                            <strong class="elapsed-value" id="elapsedTime">00:00</strong>
-                            <span class="control-note">นับเฉพาะช่วงที่ระบบตรวจพบผู้ใช้งาน</span>
-                        </div>
+                    <div class="session-timer-card">
+                        <div class="timer-inline-row">
 
-                        <div class="toggle-grid">
-                            <label class="toggle-card sound-toggle-card">
-                                <input type="checkbox" id="speechToggleBtn" class="sound-toggle-input">
-                                <span class="toggle-switch sound-toggle-switch">
-                                    <span class="toggle-knob sound-toggle-knob"></span>
-                                </span>
+                            <div class="timer-usage-inline">
+                                <span class="timer-label">เวลาที่ใช้งาน</span>
+                                <span class="timer-value" id="elapsedTime">00:00</span>
+                            </div>
 
-                                <span class="toggle-text sound-toggle-text">
-                                    <strong class="sound-title">เสียงเตือน</strong>
-                                    <small class="sound-desc" id="soundDesc">ปิดอยู่</small>
-                                </span>
-                            </label>
+                            <div class="timer-action-group">
 
-                            <label class="toggle-card notify-toggle-card">
-                                <input type="checkbox" id="notifyToggleBtn" class="notify-toggle-input">
-                                <span class="toggle-switch notify-toggle-switch">
-                                    <span class="toggle-knob notify-toggle-knob"></span>
-                                </span>
+                                <!-- Sound Notification -->
+                                <label class="sound-toggle-card compact-toggle-card">
+                                    <input type="checkbox" id="speechToggleBtn" class="sound-toggle-input">
 
-                                <span class="toggle-text notify-toggle-text">
-                                    <strong class="notify-title">แจ้งเตือน browser</strong>
-                                    <small class="notify-desc" id="notifyDesc">กดเพื่อเปิด</small>
-                                </span>
-                            </label>
+                                    <span class="sound-toggle-switch">
+                                        <span class="sound-toggle-knob"></span>
+                                    </span>
+
+                                    <div class="sound-toggle-text">
+                                        <div class="sound-title">แจ้งเตือนเสียง</div>
+                                        <div class="sound-desc" id="soundDesc">ปิดอยู่</div>
+                                    </div>
+                                </label>
+
+                                <!-- Browser Notification -->
+                                <label class="notify-toggle-card compact-toggle-card">
+                                    <input type="checkbox" id="notifyToggleBtn" class="notify-toggle-input">
+
+                                    <span class="notify-toggle-switch">
+                                        <span class="notify-toggle-knob"></span>
+                                    </span>
+
+                                    <div class="notify-toggle-text">
+                                        <div class="notify-title">แจ้งเตือนข้อความ</div>
+                                        <div class="notify-desc" id="notifyDesc">กดเพื่อเปิด</div>
+                                    </div>
+                                </label>
+
+                            </div>
+
                         </div>
                     </div>
                 </section>
 
                 <!-- RIGHT: INFO -->
-                <aside class="monitoring-panel" aria-label="ข้อมูลการวิเคราะห์">
+                <aside class="info-panel">
 
-                    <section class="status-card" id="statusCard">
+                    <div class="status-card" id="statusCard">
                         <span class="status-eyebrow">สถานะปัจจุบัน</span>
                         <div class="status-badge" id="statusBadge">กำลังโหลด...</div>
                         <div class="status-message" id="statusMessage">รอข้อมูลจากระบบ</div>
                         <p class="status-advice" id="currentAdvice">
                             ระบบกำลังวิเคราะห์ท่าทางจากกล้อง
                         </p>
-                    </section>
+                    </div>
 
-                    <section class="issue-grid" aria-label="ค่ามุมที่ใช้วิเคราะห์">
-                        <article class="issue-card" id="cvaCard">
-                            <div class="issue-head">
-                                <div>
-                                    <span class="issue-kicker">CVA</span>
-                                    <h3>คอยื่น</h3>
-                                </div>
-                                <span class="issue-state" id="cvaIssueState">กำลังอ่านค่า</span>
+                    <div class="metrics">
+                        <div class="metric">
+                            <span class="metric-label">คอ / CVA</span>
+                            <div class="metric-number">
+                                <span class="metric-value" id="cvaValue">—</span>
+                                <span class="metric-unit">°</span>
                             </div>
+                            <span class="metric-hint" id="cvaHint">กำลังอ่านค่า</span>
+                        </div>
 
-                            <div class="angle-row">
-                                <strong id="cvaValue">—</strong>
-                                <span>องศา</span>
+                        <div class="metric">
+                            <span class="metric-label">ไหล่ / FSA</span>
+                            <div class="metric-number">
+                                <span class="metric-value" id="fsaValue">—</span>
+                                <span class="metric-unit">°</span>
                             </div>
+                            <span class="metric-hint" id="fsaHint">กำลังอ่านค่า</span>
+                        </div>
+                    </div>
 
-                            <div class="issue-progress">
-                                <div class="issue-progress-bar" id="cvaTimerBar"></div>
-                            </div>
-
-                            <div class="issue-foot">
-                                <span id="cvaHint">กำลังอ่านค่า</span>
-                                <strong id="cvaTimer">00:00</strong>
-                            </div>
-                        </article>
-
-                        <article class="issue-card" id="fsaCard">
-                            <div class="issue-head">
-                                <div>
-                                    <span class="issue-kicker">FSA</span>
-                                    <h3>ไหล่ห่อ</h3>
-                                </div>
-                                <span class="issue-state" id="fsaIssueState">กำลังอ่านค่า</span>
-                            </div>
-
-                            <div class="angle-row">
-                                <strong id="fsaValue">—</strong>
-                                <span>องศา</span>
-                            </div>
-
-                            <div class="issue-progress">
-                                <div class="issue-progress-bar" id="fsaTimerBar"></div>
-                            </div>
-
-                            <div class="issue-foot">
-                                <span id="fsaHint">กำลังอ่านค่า</span>
-                                <strong id="fsaTimer">00:00</strong>
-                            </div>
-                        </article>
-                    </section>
-
-                    <section class="session-stats">
+                    <div class="session-stats">
                         <div class="stats-heading">
-                            <div>
-                                <span class="section-kicker">Session Dashboard</span>
-                                <h3 class="stats-title">สถิติรอบนี้</h3>
-                            </div>
-                            <span>อัปเดตจาก backend</span>
+                            <h3 class="stats-title">สถิติรอบนี้</h3>
+                            <span>สะสมระหว่างใช้งาน</span>
                         </div>
 
                         <div class="stat-row">
@@ -179,19 +148,11 @@
                             <strong id="roundedShoulderAlertCount">0 ครั้ง</strong>
                         </div>
 
-                        <div class="stat-row total-row">
+                        <div class="stat-row">
                             <span>จำนวนแจ้งเตือนรวม</span>
                             <strong id="alertCount">0 ครั้ง</strong>
                         </div>
-                    </section>
-
-                    <section class="present-note">
-                        <strong>สำหรับนำเสนอ</strong>
-                        <p>
-                            ระบบไม่แจ้งเตือนทันทีเมื่อค่ามุมผิดปกติ แต่จะจับเวลาต่อเนื่องก่อน
-                            เพื่อลด false alarm จากการขยับตัวชั่วคราว
-                        </p>
-                    </section>
+                    </div>
 
                 </aside>
             </div>

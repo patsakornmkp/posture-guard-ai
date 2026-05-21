@@ -17,104 +17,102 @@
     <div id="header"></div>
 
     <main class="dashboard summary-dashboard">
-        <section class="summary-page">
+        <section class="summary-page summary-compact">
 
-            <header class="summary-hero">
+            <header class="summary-topbar">
                 <div>
-                    <span class="summary-kicker">PostureGuard AI Report</span>
-                    <h2 class="summary-title">Dashboard สรุปผลหลังใช้งาน</h2>
+                    <h2 class="summary-title">สรุปผลการใช้งาน</h2>
                     <p class="summary-subtitle" id="summaryDate">—</p>
                 </div>
 
                 <div class="summary-actions-top">
-                    <button class="summary-secondary-btn" id="printReportBtn" type="button">
-                        พิมพ์รายงาน
-                    </button>
-                    <a href="history.html" class="summary-secondary-btn">ดูประวัติ</a>
                     <a href="setup.html" class="summary-primary-btn">เริ่มใหม่</a>
                 </div>
             </header>
 
-            <section class="summary-dashboard-grid" aria-label="ภาพรวม session">
-                <article class="score-card">
-                    <div class="score-circle-wrap">
-                        <svg class="score-circle" viewBox="0 0 120 120" aria-hidden="true">
-                            <circle class="score-bg" cx="60" cy="60" r="52"></circle>
-                            <circle
-                                class="score-fg"
-                                id="scoreCircleFg"
-                                cx="60"
-                                cy="60"
-                                r="52"
-                                stroke-dasharray="326.7"
-                                stroke-dashoffset="326.7">
-                            </circle>
-                        </svg>
-
-                        <div class="score-text">
-                            <span class="score-value" id="scoreValue">0</span>
-                            <span class="score-label">คะแนน</span>
-                        </div>
-                    </div>
-
-                    <div class="score-info">
-                        <span class="section-eyebrow">Posture Score</span>
-                        <h3 class="score-grade" id="scoreGrade">กำลังประมวลผล</h3>
-                        <p class="score-message" id="scoreMessage">
-                            ระบบกำลังวิเคราะห์ข้อมูลท่าทางจาก session นี้
-                        </p>
-
-                        <div class="risk-pill" id="riskPill">
-                            <span>ระดับความเสี่ยง</span>
-                            <strong id="sumRisk">—</strong>
-                        </div>
-                    </div>
-                </article>
-
-                <div class="kpi-grid">
-                    <article class="kpi-card">
-                        <span class="kpi-label">เวลาที่ใช้งานจริง</span>
-                        <strong class="kpi-value" id="sumEffective">—</strong>
-                        <small>นับเฉพาะช่วงที่ตรวจพบผู้ใช้</small>
-                    </article>
-
-                    <article class="kpi-card">
-                        <span class="kpi-label">ท่าทางปกติ</span>
-                        <strong class="kpi-value" id="sumGoodRatio">—</strong>
-                        <small id="sumGood">—</small>
-                    </article>
-
-                    <article class="kpi-card">
-                        <span class="kpi-label">สัดส่วนท่าทางเสี่ยง</span>
-                        <strong class="kpi-value" id="sumIssueRatio">—</strong>
-                        <small id="sumIssueTime">—</small>
-                    </article>
-
-                    <article class="kpi-card alert-kpi">
-                        <span class="kpi-label">แจ้งเตือนรวม</span>
-                        <strong class="kpi-value" id="sumAlerts">—</strong>
-                        <small>นับเฉพาะ alert trigger จริง</small>
-                    </article>
-                </div>
-            </section>
-
             <div class="summary-layout">
-                <section class="summary-main">
 
-                    <article class="summary-card analysis-card">
-                        <div class="card-heading">
-                            <div>
-                                <span class="section-eyebrow">Posture Analysis</span>
-                                <h3 class="card-title">การวิเคราะห์ท่าทาง</h3>
+                <!-- LEFT -->
+                <section class="summary-left">
+
+                    <div class="score-card compact-card">
+                        <div class="score-circle-wrap">
+                            <svg class="score-circle" viewBox="0 0 120 120">
+                                <circle class="score-bg" cx="60" cy="60" r="52"></circle>
+                                <circle
+                                    class="score-fg"
+                                    id="scoreCircleFg"
+                                    cx="60"
+                                    cy="60"
+                                    r="52"
+                                    stroke-dasharray="326.7"
+                                    stroke-dashoffset="326.7">
+                                </circle>
+                            </svg>
+
+                            <div class="score-text">
+                                <span class="score-value" id="scoreValue">0</span>
+                                <span class="score-label">คะแนน</span>
                             </div>
-                            <p class="card-desc">แยกตามปัญหาที่ตรวจจับด้วย CVA และ FSA</p>
+                        </div>
+
+                        <div class="score-info">
+                            <span class="section-eyebrow">Posture Score</span>
+                            <h3 class="score-grade" id="scoreGrade">กำลังประมวลผล</h3>
+                            <p class="score-message" id="scoreMessage">
+                                ระบบกำลังวิเคราะห์ข้อมูลท่าทางจากการใช้งาน
+                            </p>
+
+                            <div class="risk-pill" id="riskPill">
+                                <span>ระดับความเสี่ยง</span>
+                                <strong id="sumRisk">—</strong>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="overview-grid">
+                        <div class="overview-card">
+                            <span class="overview-label">เวลาที่ใช้งาน</span>
+                            <strong class="overview-value" id="sumEffective">—</strong>
+                        </div>
+
+                        <div class="overview-card">
+                            <span class="overview-label">สัดส่วนท่าทางผิด</span>
+                            <strong class="overview-value" id="sumIssueRatio">—</strong>
+                        </div>
+
+                        <div class="overview-card">
+                            <span class="overview-label">จำนวนแจ้งเตือนรวม</span>
+                            <strong class="overview-value" id="sumAlerts">—</strong>
+                        </div>
+
+                        <div class="overview-card">
+                            <span class="overview-label">แจ้งเตือนคอยื่น</span>
+                            <strong class="overview-value" id="sumForwardAlerts">—</strong>
+                        </div>
+
+                        <div class="overview-card">
+                            <span class="overview-label">แจ้งเตือนไหล่ห่อ</span>
+                            <strong class="overview-value" id="sumRoundedAlerts">—</strong>
+                        </div>
+                    </div>
+
+                </section>
+
+                <!-- RIGHT -->
+                <section class="summary-right">
+
+                    <div class="compact-card analysis-card">
+                        <div class="card-heading">
+                            <h3 class="card-title">การวิเคราะห์ท่าทาง</h3>
+                            <p class="card-desc">คำนวณจากเวลาที่ระบบตรวจพบผู้ใช้งานจริง</p>
                         </div>
 
                         <div class="analysis-list">
                             <div class="analysis-row good">
                                 <div class="analysis-meta">
                                     <span class="analysis-label">ท่าทางปกติ</span>
-                                    <span class="analysis-time" id="sumGoodTimeInline">—</span>
+                                    <span class="analysis-time" id="sumGood">—</span>
                                 </div>
 
                                 <div class="analysis-progress">
@@ -126,7 +124,7 @@
 
                             <div class="analysis-row forward">
                                 <div class="analysis-meta">
-                                    <span class="analysis-label">คอยื่น / CVA</span>
+                                    <span class="analysis-label">คอยื่น</span>
                                     <span class="analysis-time">
                                         แจ้งเตือน <span id="sumForwardAlertCount">0 ครั้ง</span>
                                     </span>
@@ -141,7 +139,7 @@
 
                             <div class="analysis-row rounded">
                                 <div class="analysis-meta">
-                                    <span class="analysis-label">ไหล่ห่อ / FSA</span>
+                                    <span class="analysis-label">ไหล่ห่อ</span>
                                     <span class="analysis-time">
                                         แจ้งเตือน <span id="sumRoundedAlertCount">0 ครั้ง</span>
                                     </span>
@@ -154,14 +152,11 @@
                                 <strong class="analysis-percent" id="sumRoundedPct">—</strong>
                             </div>
                         </div>
-                    </article>
+                    </div>
 
-                    <article class="summary-card insight-card">
+                    <div class="compact-card insight-card">
                         <div class="card-heading">
-                            <div>
-                                <span class="section-eyebrow">Main Insight</span>
-                                <h3 class="card-title">สรุปพฤติกรรมหลัก</h3>
-                            </div>
+                            <h3 class="card-title">สรุปพฤติกรรมหลัก</h3>
                         </div>
 
                         <div class="insight-box">
@@ -171,61 +166,20 @@
                                 <p id="mainIssueDesc">ระบบกำลังประมวลผลข้อมูลจาก session นี้</p>
                             </div>
                         </div>
-                    </article>
-                </section>
+                    </div>
 
-                <aside class="summary-side">
-                    <article class="summary-card alert-breakdown-card">
+                    <div class="compact-card recommendation-card">
                         <div class="card-heading">
-                            <div>
-                                <span class="section-eyebrow">Alert Breakdown</span>
-                                <h3 class="card-title">จำนวนแจ้งเตือน</h3>
-                            </div>
-                        </div>
-
-                        <div class="breakdown-list">
-                            <div class="breakdown-item">
-                                <span>คอยื่น</span>
-                                <strong id="sumForwardAlerts">—</strong>
-                            </div>
-                            <div class="breakdown-item">
-                                <span>ไหล่ห่อ</span>
-                                <strong id="sumRoundedAlerts">—</strong>
-                            </div>
-                            <div class="breakdown-item total">
-                                <span>รวมทั้งหมด</span>
-                                <strong id="sumAlertsInline">—</strong>
-                            </div>
-                        </div>
-                    </article>
-
-                    <article class="summary-card recommendation-card">
-                        <div class="card-heading">
-                            <div>
-                                <span class="section-eyebrow">Recommendation</span>
-                                <h3 class="card-title">คำแนะนำหลังใช้งาน</h3>
-                            </div>
+                            <h3 class="card-title">คำแนะนำหลังใช้งาน</h3>
                         </div>
 
                         <ul class="rec-list" id="recList">
                             <li>กำลังประมวลผล...</li>
                         </ul>
-                    </article>
+                    </div>
 
-                    <article class="summary-card explain-card">
-                        <div class="card-heading">
-                            <div>
-                                <span class="section-eyebrow">Presentation Note</span>
-                                <h3 class="card-title">หลักการประเมิน</h3>
-                            </div>
-                        </div>
+                </section>
 
-                        <p>
-                            คะแนนและระดับความเสี่ยงคำนวณจากเวลาที่ระบบตรวจพบผู้ใช้งานจริง
-                            จำนวน alert และสัดส่วนเวลาที่เกิดปัญหา โดยแยกคอยื่นและไหล่ห่อออกจากกัน
-                        </p>
-                    </article>
-                </aside>
             </div>
         </section>
     </main>

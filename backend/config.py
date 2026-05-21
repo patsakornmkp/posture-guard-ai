@@ -145,7 +145,7 @@ DRAW_FULL_BODY_SKELETON: bool = False
 # - "right" = กล้องอยู่ด้านขวาของผู้ใช้ ใช้ RIGHT_EAR / RIGHT_SHOULDER เป็นหลัก
 # - "left"  = กล้องอยู่ด้านซ้ายของผู้ใช้ ใช้ LEFT_EAR / LEFT_SHOULDER เป็นหลัก
 # - "auto"  = ให้ detector เลือกฝั่งจาก visibility อัตโนมัติ
-CAMERA_SIDE: str = "right"
+CAMERA_SIDE: str = "auto"
 
 # ทิศทางด้านหน้าของผู้ใช้ในภาพ
 # 1  = ด้านหน้าอยู่ทางขวาของภาพ
@@ -223,7 +223,7 @@ TRAGUS_FORWARD_OFFSET_RATIO: float = 0.018
 # ใช้ marker เฉพาะจุดกกหู / tragus เท่านั้น
 # ไม่ใช้ marker C7 และ shoulder เพื่อลดปัญหาจุดสลับกัน
 
-ENABLE_GREEN_MARKER_DETECTION: bool = True
+ENABLE_GREEN_MARKER_DETECTION: bool = False
 
 # ถ้าใช้ marker สีเขียว ให้ใช้ค่านี้
 # GREEN_HSV_LOWER: tuple[int, int, int] = (35, 80, 80)
