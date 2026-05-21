@@ -20,7 +20,10 @@
     // แก้ตัวนี้ถ้า backend รันที่ host อื่น
     // ถ้าเปิด frontend จากเครื่องเดียวกับ backend ให้ใช้ localhost ได้
     // ถ้าเปิด frontend จาก notebook แต่ backend อยู่ Raspberry Pi ให้เปลี่ยนเป็น IP ของ Raspberry Pi
-    const API_BASE = 'http://localhost:8000';
+    const API_BASE =
+        window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+            ? 'http://127.0.0.1:8000'
+            : `http://${window.location.hostname}:8000`;
     const STORAGE_KEYS = {
         currentUser: 'currentUser',
         currentSessionId: 'currentSessionId',
@@ -103,11 +106,6 @@
         // Posture
         getCurrentPosture() {
             return apiRequest('GET', '/posture/current');
-        },
-
-        // Calibration
-        calibrate() {
-            return apiRequest('POST', '/calibrate');
         },
 
         // Session
