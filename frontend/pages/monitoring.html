@@ -22,9 +22,6 @@
             <div class="monitoring-head">
                 <div>
                     <h2 class="monitoring-title">กำลังตรวจจับท่าทาง</h2>
-                    <p class="monitoring-subtitle">
-                        ระบบจะแสดงสถานะปัจจุบัน พร้อมคำแนะนำเมื่อค่ามุมไม่อยู่ในเกณฑ์ปกติ
-                    </p>
                 </div>
 
                 <div class="monitoring-head-actions">
@@ -59,37 +56,11 @@
                                 <span class="timer-value" id="elapsedTime">00:00</span>
                             </div>
 
-                            <div class="timer-action-group">
-
-                                <!-- Sound Notification -->
-                                <label class="sound-toggle-card compact-toggle-card">
-                                    <input type="checkbox" id="speechToggleBtn" class="sound-toggle-input">
-
-                                    <span class="sound-toggle-switch">
-                                        <span class="sound-toggle-knob"></span>
-                                    </span>
-
-                                    <div class="sound-toggle-text">
-                                        <div class="sound-title">แจ้งเตือนเสียง</div>
-                                        <div class="sound-desc" id="soundDesc">ปิดอยู่</div>
-                                    </div>
-                                </label>
-
-                                <!-- Browser Notification -->
-                                <label class="notify-toggle-card compact-toggle-card">
-                                    <input type="checkbox" id="notifyToggleBtn" class="notify-toggle-input">
-
-                                    <span class="notify-toggle-switch">
-                                        <span class="notify-toggle-knob"></span>
-                                    </span>
-
-                                    <div class="notify-toggle-text">
-                                        <div class="notify-title">แจ้งเตือนข้อความ</div>
-                                        <div class="notify-desc" id="notifyDesc">กดเพื่อเปิด</div>
-                                    </div>
-                                </label>
-
-                            </div>
+                            <button class="monitoring-settings-btn" id="settingsBtn" type="button"
+                                aria-haspopup="dialog" aria-controls="settingsPanel">
+                                <span class="settings-icon">⚙</span>
+                                <span>ตั้งค่า</span>
+                            </button>
 
                         </div>
                     </div>
@@ -129,27 +100,38 @@
 
                     <div class="session-stats">
                         <div class="stats-heading">
-                            <h3 class="stats-title">สถิติรอบนี้</h3>
-                            <span>สะสมระหว่างใช้งาน</span>
+                            <div class="stats-heading-left">
+                                <h3 class="stats-title">สถิติรอบการใช้งาน</h3>
+                            </div>
+
+                            <button class="chart-open-btn" id="chartOpenBtn" type="button"
+                                aria-haspopup="dialog" aria-controls="chartPanel">
+                                ดูกราฟ
+                            </button>
                         </div>
 
                         <div class="stat-row">
                             <span>ท่าทางเหมาะสม</span>
-                            <strong id="goodTime">00:00</strong>
+                            <strong id="goodPostureRatio">0%</strong>
                         </div>
 
                         <div class="stat-row">
-                            <span>แจ้งเตือนคอยื่น</span>
-                            <strong id="forwardHeadAlertCount">0 ครั้ง</strong>
+                            <span>ท่าทางเสี่ยงสะสม</span>
+                            <strong id="riskPostureRatio">0%</strong>
                         </div>
 
                         <div class="stat-row">
-                            <span>แจ้งเตือนไหล่ห่อ</span>
-                            <strong id="roundedShoulderAlertCount">0 ครั้ง</strong>
+                            <span>ภาวะคอยื่นสะสม</span>
+                            <strong id="forwardHeadDuration">00:00</strong>
                         </div>
 
                         <div class="stat-row">
-                            <span>จำนวนแจ้งเตือนรวม</span>
+                            <span>ภาวะไหล่ห่อสะสม</span>
+                            <strong id="roundedShoulderDuration">00:00</strong>
+                        </div>
+
+                        <div class="stat-row">
+                            <span>การแจ้งเตือนทั้งหมด</span>
                             <strong id="alertCount">0 ครั้ง</strong>
                         </div>
                     </div>
@@ -158,6 +140,104 @@
             </div>
         </section>
     </main>
+
+    <!-- SETTINGS PANEL -->
+    <div class="settings-overlay" id="settingsOverlay" hidden></div>
+
+    <section class="settings-panel" id="settingsPanel" role="dialog" aria-modal="true"
+        aria-labelledby="settingsTitle" hidden>
+
+        <div class="panel-head">
+            <h3 class="panel-title" id="settingsTitle">ตั้งค่า</h3>
+
+            <button class="panel-close-btn" id="settingsCloseBtn" type="button" aria-label="ปิดหน้าตั้งค่า">
+                ✕
+            </button>
+        </div>
+
+        <div class="settings-list">
+
+            <!-- Sound Notification -->
+            <label class="settings-toggle-row">
+                <input type="checkbox" id="speechToggleBtn" class="settings-toggle-input">
+
+                <span class="settings-toggle-switch">
+                    <span class="settings-toggle-knob"></span>
+                </span>
+
+                <span class="settings-toggle-text">
+                    <span class="settings-toggle-title">แจ้งเตือนเสียง</span>
+                    <span class="settings-toggle-desc" id="soundDesc">ปิดอยู่</span>
+                </span>
+            </label>
+
+            <!-- Browser Notification -->
+            <label class="settings-toggle-row">
+                <input type="checkbox" id="notifyToggleBtn" class="settings-toggle-input">
+
+                <span class="settings-toggle-switch">
+                    <span class="settings-toggle-knob"></span>
+                </span>
+
+                <span class="settings-toggle-text">
+                    <span class="settings-toggle-title">แจ้งเตือนข้อความบน Browser</span>
+                    <span class="settings-toggle-desc" id="notifyDesc">กดเพื่อเปิด</span>
+                </span>
+            </label>
+
+            <!-- LINE Notification -->
+            <label class="settings-toggle-row">
+                <input type="checkbox" id="lineToggleBtn" class="settings-toggle-input" disabled>
+
+                <span class="settings-toggle-switch">
+                    <span class="settings-toggle-knob"></span>
+                </span>
+
+                <span class="settings-toggle-text">
+                    <span class="settings-toggle-title">แจ้งเตือน LINE</span>
+                    <span class="settings-toggle-desc" id="lineDesc">รอเชื่อมต่อ</span>
+                </span>
+            </label>
+
+        </div>
+    </section>
+
+    <!-- CHART PANEL -->
+    <div class="chart-overlay" id="chartOverlay" hidden></div>
+
+    <section class="chart-panel" id="chartPanel" role="dialog" aria-modal="true"
+        aria-labelledby="chartTitle" hidden>
+
+        <div class="panel-head">
+            <h3 class="panel-title" id="chartTitle">กราฟแนวโน้มค่า CVA / FSA</h3>
+
+            <button class="panel-close-btn" id="chartCloseBtn" type="button" aria-label="ปิดกราฟ">
+                ✕
+            </button>
+        </div>
+
+        <div class="chart-body">
+            <div class="chart-legend">
+                <span class="legend-item">
+                    <i class="legend-line legend-cva"></i>
+                    CVA / คอ
+                </span>
+
+                <span class="legend-item">
+                    <i class="legend-line legend-fsa"></i>
+                    FSA / ไหล่
+                </span>
+            </div>
+
+            <div class="chart-svg-wrap">
+                <svg class="chart-svg" id="angleChartSvg" viewBox="0 0 760 330"
+                    role="img" aria-label="กราฟเส้นแนวโน้มค่า CVA และ FSA">
+                </svg>
+            </div>
+        </div>
+    </section>
+
+    <div class="monitoring-toast" id="monitoringToast" hidden></div>
 
     <div id="footer"></div>
 

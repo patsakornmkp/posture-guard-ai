@@ -426,3 +426,304 @@
 
     installBrowserHistoryGuard();
 })();
+/* =========================================
+   PostureGuard UX Flow Compatibility Patch
+   แก้กรณีไฟล์อื่นเรียก utils.getBackendSessionStatus()
+   แต่ app.js เดิมยังไม่มี function นี้
+========================================= */
+
+(function () {
+    "use strict";
+
+    if (!window.utils) {
+        window.utils = {};
+    }
+
+    const API_BASE =
+        window.utils.API_BASE ||
+        (
+            window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
+                ? "http://127.0.0.1:8000"
+                : `http://${window.location.hostname}:8000`
+        );
+
+    const STORAGE_KEYS = {
+        currentUser: "currentUser",
+        currentSessionId: "currentSessionId",
+        plannedMinutes: "plannedMinutes",
+        lastSessionId: "lastSessionId",
+        lastSessionSummary: "lastSessionSummary",
+        monitoringSessionActive: "monitoringSessionActive",
+    };
+
+    function redirectTo(page, options = {}) {
+        const replace = options.replace !== false;
+
+        if (replace) {
+            window.location.replace(page);
+        } else {
+            window.location.href = page;
+        }
+    }
+
+    function getCurrentUser() {
+        const raw = localStorage.getItem(STORAGE_KEYS.currentUser);
+
+        if (!raw) return null;
+
+        try {
+            return JSON.parse(raw);
+        } catch (_) {
+            localStorage.removeItem(STORAGE_KEYS.currentUser);
+            return null;
+        }
+    }
+
+    function isMonitoringSessionActive() {
+        return (
+            localStorage.getItem(STORAGE_KEYS.monitoringSessionActive) === "true" ||
+            Boolean(localStorage.getItem(STORAGE_KEYS.currentSessionId))
+        );
+    }
+
+    function clearSessionFlowState(options = {}) {
+        const keepLast = options.keepLast === true;
+
+        localStorage.removeItem(STORAGE_KEYS.currentSessionId);
+        localStorage.removeItem(STORAGE_KEYS.monitoringSessionActive);
+        localStorage.removeItem(STORAGE_KEYS.plannedMinutes);
+
+        if (!keepLast) {
+            localStorage.removeItem(STORAGE_KEYS.lastSessionId);
+            localStorage.removeItem(STORAGE_KEYS.lastSessionSummary);
+        }
+    }
+
+    function markMonitoringSessionStarted(sessionId) {
+        if (sessionId !== undefined && sessionId !== null) {
+            localStorage.setItem(STORAGE_KEYS.currentSessionId, String(sessionId));
+        }
+
+        localStorage.setItem(STORAGE_KEYS.monitoringSessionActive, "true");
+        localStorage.setItem(STORAGE_KEYS.plannedMinutes, "0");
+    }
+
+    function markMonitoringSessionStopped(summary = null) {
+        const sessionId = localStorage.getItem(STORAGE_KEYS.currentSessionId);
+
+        if (sessionId) {
+            localStorage.setItem(STORAGE_KEYS.lastSessionId, sessionId);
+        }
+
+        if (summary) {
+            try {
+                localStorage.setItem(
+                    STORAGE_KEYS.lastSessionSummary,
+                    JSON.stringify(summary)
+                );
+            } catch (_) {
+                // ignore cache error
+            }
+        }
+
+        localStorage.removeItem(STORAGE_KEYS.currentSessionId);
+        localStorage.removeItem(STORAGE_KEYS.monitoringSessionActive);
+        localStorage.removeItem(STORAGE_KEYS.plannedMinutes);
+    }
+
+    function getLastSessionSummary() {
+        const raw = localStorage.getItem(STORAGE_KEYS.lastSessionSummary);
+
+        if (!raw) return null;
+
+        try {
+            return JSON.parse(raw);
+        } catch (_) {
+            localStorage.removeItem(STORAGE_KEYS.lastSessionSummary);
+            return null;
+        }
+    }
+
+    async function fetchSessionSummary() {
+        if (window.api && typeof window.api.getSessionSummary === "function") {
+            return window.api.getSessionSummary();
+        }
+
+        const response = await fetch(`${API_BASE}/session/summary`);
+
+        if (!response.ok) {
+            throw new Error(`Session summary error ${response.status}`);
+        }
+
+        return response.json();
+    }
+
+    async function getBackendSessionStatus() {
+        try {
+            const summary = await fetchSessionSummary();
+
+            if (summary && summary.session_active === true) {
+                localStorage.setItem(STORAGE_KEYS.monitoringSessionActive, "true");
+
+                return {
+                    status: "active",
+                    summary,
+                    error: null,
+                };
+            }
+
+            clearSessionFlowState({ keepLast: true });
+
+            return {
+                status: "inactive",
+                summary,
+                error: null,
+            };
+        } catch (err) {
+            console.warn("Cannot check backend session:", err);
+
+            return {
+                status: "unknown",
+                summary: null,
+                error: err,
+            };
+        }
+    }
+
+    function requireAuth() {
+        const user = getCurrentUser();
+
+        if (!user) {
+            redirectTo("login.html", { replace: true });
+            return null;
+        }
+
+        return user;
+    }
+
+    async function redirectAuthenticatedAwayFromAuthPage() {
+        const user = getCurrentUser();
+
+        if (!user) {
+            return true;
+        }
+
+        const hadLocalActiveSession = isMonitoringSessionActive();
+        const session = await getBackendSessionStatus();
+
+        if (
+            session.status === "active" ||
+            (session.status === "unknown" && hadLocalActiveSession)
+        ) {
+            redirectTo("monitoring.html", { replace: true });
+            return false;
+        }
+
+        redirectTo("setup.html", { replace: true });
+        return false;
+    }
+
+    async function requireNoActiveMonitoring() {
+        const user = requireAuth();
+
+        if (!user) {
+            return false;
+        }
+
+        const hadLocalActiveSession = isMonitoringSessionActive();
+        const session = await getBackendSessionStatus();
+
+        if (
+            session.status === "active" ||
+            (session.status === "unknown" && hadLocalActiveSession)
+        ) {
+            redirectTo("monitoring.html", { replace: true });
+            return false;
+        }
+
+        return true;
+    }
+
+    async function requireActiveMonitoringSession() {
+        const user = requireAuth();
+
+        if (!user) {
+            return false;
+        }
+
+        const hadLocalActiveSession = isMonitoringSessionActive();
+        const session = await getBackendSessionStatus();
+
+        if (session.status === "active") {
+            return true;
+        }
+
+        if (session.status === "unknown" && hadLocalActiveSession) {
+            return true;
+        }
+
+        if (getLastSessionSummary() || localStorage.getItem(STORAGE_KEYS.lastSessionId)) {
+            redirectTo("summary.html", { replace: true });
+        } else {
+            redirectTo("setup.html", { replace: true });
+        }
+
+        return false;
+    }
+
+    async function requireSummaryAccess() {
+        const user = requireAuth();
+
+        if (!user) {
+            return false;
+        }
+
+        const hadLocalActiveSession = isMonitoringSessionActive();
+        const session = await getBackendSessionStatus();
+
+        if (
+            session.status === "active" ||
+            (session.status === "unknown" && hadLocalActiveSession)
+        ) {
+            redirectTo("monitoring.html", { replace: true });
+            return false;
+        }
+
+        return true;
+    }
+
+    async function requireHistoryAccess() {
+        return requireSummaryAccess();
+    }
+
+    function logout() {
+        if (isMonitoringSessionActive()) {
+            redirectTo("monitoring.html", { replace: true });
+            return;
+        }
+
+        localStorage.removeItem(STORAGE_KEYS.currentUser);
+        clearSessionFlowState({ keepLast: false });
+        redirectTo("login.html", { replace: true });
+    }
+
+    Object.assign(window.utils, {
+        API_BASE,
+        STORAGE_KEYS,
+        redirectTo,
+        getCurrentUser,
+        isMonitoringSessionActive,
+        clearSessionFlowState,
+        markMonitoringSessionStarted,
+        markMonitoringSessionStopped,
+        getLastSessionSummary,
+        getBackendSessionStatus,
+        requireAuth,
+        redirectAuthenticatedAwayFromAuthPage,
+        requireNoActiveMonitoring,
+        requireActiveMonitoringSession,
+        requireSummaryAccess,
+        requireHistoryAccess,
+        logout,
+    });
+})();
