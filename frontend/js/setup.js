@@ -1,5 +1,8 @@
-document.addEventListener('DOMContentLoaded', () => {
-    const user = utils.requireAuth();
+document.addEventListener('DOMContentLoaded', async () => {
+    const canUseSetup = await utils.requireNoActiveMonitoring();
+    if (!canUseSetup) return;
+
+    const user = utils.getCurrentUser();
     if (!user) return;
 
     const startBtn = document.getElementById('startBtn');
@@ -34,15 +37,17 @@ document.addEventListener('DOMContentLoaded', () => {
             // ส่ง 0 = ไม่จำกัดเวลา / realtime mode
             const result = await api.startSession(user.id, 0);
 
-            localStorage.setItem('currentSessionId', result.session_id);
-            localStorage.setItem('plannedMinutes', '0');
+            utils.markMonitoringSessionStarted(result.session_id);
 
-            window.location.href = 'monitoring.html';
+            // ใช้ replace เพื่อไม่ให้ browser back กลับมาหน้า setup ระหว่าง monitoring active
+            utils.redirectTo('monitoring.html', { replace: true });
         } catch (err) {
             // ถ้าเปิดกล้องสำเร็จแล้ว แต่เริ่ม session ไม่สำเร็จ ให้พยายามปิดกล้องกันค้าง
             try {
                 await api.stopCamera();
             } catch (_) {}
+
+            utils.clearSessionFlowState({ keepLast: true });
 
             alert('ไม่สามารถเริ่ม session ได้: ' + err.message);
 

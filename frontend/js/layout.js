@@ -47,12 +47,19 @@
                     return;
                 }
 
+                if (window.utils && typeof window.utils.logout === "function") {
+                    window.utils.logout();
+                    return;
+                }
+
                 localStorage.removeItem("currentUser");
                 localStorage.removeItem("currentSessionId");
                 localStorage.removeItem("lastSessionId");
+                localStorage.removeItem("lastSessionSummary");
                 localStorage.removeItem("plannedMinutes");
+                localStorage.removeItem("monitoringSessionActive");
 
-                window.location.href = "login.html";
+                window.location.replace("login.html");
             });
         }
     }

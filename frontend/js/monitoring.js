@@ -49,9 +49,9 @@
 
     const $ = (id) => document.getElementById(id);
 
-    document.addEventListener("DOMContentLoaded", () => {
-        const user = utils.requireAuth();
-        if (!user) return;
+    document.addEventListener("DOMContentLoaded", async () => {
+        const canMonitor = await utils.requireActiveMonitoringSession();
+        if (!canMonitor) return;
 
         displayedElapsedSeconds = 0;
         elapsedCountingActive = false;
@@ -66,7 +66,7 @@
         setText("plannedTime", "ไม่จำกัด");
         setText("remainingTime", "Realtime");
         setText("elapsedTime", formatTime(displayedElapsedSeconds));
-
+        lockBrowserBackDuringActiveSession();
         setupVideoStatus();
         setupNotificationToggle();
 
@@ -77,6 +77,62 @@
 
         startPolling();
     });
+    /* =========================
+   Browser History Guard
+========================= */
+
+    function lockBrowserBackDuringActiveSession() {
+        try {
+            window.history.replaceState(
+                { postureGuardPage: "monitoring" },
+                "",
+                window.location.href
+            );
+
+            window.history.pushState(
+                { postureGuardPage: "monitoring-lock" },
+                "",
+                window.location.href
+            );
+        } catch (err) {
+            console.warn("Cannot update browser history:", err);
+        }
+
+        window.addEventListener("popstate", handleMonitoringBackNavigation);
+        window.addEventListener("pageshow", handleMonitoringPageShow);
+    }
+
+    function handleMonitoringBackNavigation() {
+        if (sessionEnded) return;
+
+        if (!utils.isMonitoringSessionActive()) {
+            utils.redirectTo("summary.html", { replace: true });
+            return;
+        }
+
+        try {
+            window.history.pushState(
+                { postureGuardPage: "monitoring-lock" },
+                "",
+                window.location.href
+            );
+        } catch (err) {
+            console.warn("Cannot lock browser back navigation:", err);
+        }
+
+        setText(
+            "currentAdvice",
+            "หากต้องการออกจากหน้านี้ กรุณากดปุ่มหยุดการใช้งานก่อน"
+        );
+    }
+
+    function handleMonitoringPageShow(event) {
+        if (!event.persisted || sessionEnded) return;
+
+        if (!utils.isMonitoringSessionActive()) {
+            utils.redirectTo("summary.html", { replace: true });
+        }
+    }
 
     /* =========================
        Camera / Video
@@ -652,20 +708,18 @@
                 window.alertSpeech.disable();
             }
 
-            const sessionId = localStorage.getItem("currentSessionId");
+            const summary = await api.stopSession();
 
-            // สำคัญ:
-            // stop session ต้องสำเร็จก่อน จึงค่อยไปหน้า summary
-            // เพื่อให้ backend บันทึก end_time / summary / history ถูกต้อง
-            await api.stopSession();
-
-            // stop camera ถ้าพลาด ไม่ควรทำให้ข้อมูล session หาย
             try {
                 await api.stopCamera();
-            } catch (_) {}
+            } catch (_) { }
 
-            localStorage.setItem("lastSessionId", sessionId || "");
-            window.location.href = "summary.html";
+            utils.markMonitoringSessionStopped(summary);
+            window.removeEventListener("popstate", handleMonitoringBackNavigation);
+            window.removeEventListener("pageshow", handleMonitoringPageShow);
+
+            // ใช้ replace เพื่อไม่ให้ browser back กลับมาหน้า monitoring หลังจบ session แล้ว
+            utils.redirectTo("summary.html", { replace: true });
         } catch (err) {
             alert("หยุด session ไม่สำเร็จ: " + err.message);
 

@@ -10,10 +10,11 @@
 # - แยก timer/alert active ของคอยื่น และไหล่ห่อ
 # - นับจำนวนแจ้งเตือนแยกประเภท: คอยื่น / ไหล่ห่อ
 # - ไม่มี warning แล้ว
+# - ส่ง LINE notification เฉพาะจังหวะ alert จริง ไม่ส่งทุก frame
 
 import time
 import threading
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List, Tuple
 
 import cv2
 import numpy as np
@@ -22,6 +23,12 @@ import config
 import database as db
 from detector import PoseDetector, DetectionResult
 from classifier import PostureClassifier, ClassificationResult, Status
+
+try:
+    from notification_service import send_posture_line_notification
+except Exception as err:
+    send_posture_line_notification = None
+    print(f"[LINE] notification_service import failed: {err}")
 
 
 # ========================
@@ -532,6 +539,10 @@ class CameraThread:
                 classification.bad_posture_duration,
             ))
 
+        # ส่ง LINE notification หนึ่งครั้งต่อหนึ่งจังหวะ alert
+        # ถ้าคอยื่นและไหล่ห่อ alert พร้อมกัน จะส่งข้อความแบบ multiple posture issues
+        self._send_line_notification(alert_items=alert_items)
+
         for issue_type, message, duration in alert_items:
             db.log_alert(
                 session_id=session_id,
@@ -546,6 +557,42 @@ class CameraThread:
                 fsa_angle=detection.fsa_angle,
                 duration=duration,
             )
+
+    def _send_line_notification(
+        self,
+        alert_items: List[Tuple[str, str, float]],
+    ) -> None:
+        """ส่ง LINE notification จาก alert_items โดยไม่ให้ backend crash ถ้าส่งล้มเหลว"""
+
+        if not alert_items:
+            return
+
+        if send_posture_line_notification is None:
+            return
+
+        issues: List[str] = []
+
+        for issue_type, _message, _duration in alert_items:
+            if issue_type in ["forward_head", "rounded_shoulder"]:
+                if issue_type not in issues:
+                    issues.append(issue_type)
+
+        if not issues:
+            return
+
+        try:
+            result = send_posture_line_notification(
+                issues=issues,
+                session_id=self._session.session_id,
+                force=False,
+            )
+
+            if not result.get("success") and not result.get("skipped"):
+                print(f"[LINE] notification failed: {result}")
+
+        except Exception as err:
+            # Fallback สำคัญ: ห้ามให้ LINE error ทำให้ camera/backend crash
+            print(f"[LINE] notification error ignored: {err}")
 
     @staticmethod
     def _issue_type_of(c: ClassificationResult) -> str:

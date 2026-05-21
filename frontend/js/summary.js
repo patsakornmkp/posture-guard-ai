@@ -1,11 +1,24 @@
 const $ = (id) => document.getElementById(id);
 
 document.addEventListener("DOMContentLoaded", async () => {
-    const user = utils.requireAuth();
-    if (!user) return;
+    const canViewSummary = await utils.requireSummaryAccess();
+    if (!canViewSummary) return;
+
+    const cachedSummary = utils.getLastSessionSummary();
+
+    if (cachedSummary) {
+        renderSummary(cachedSummary);
+        return;
+    }
 
     try {
         const summary = await api.getSessionSummary();
+
+        if (summary?.session_active === true) {
+            utils.redirectTo("monitoring.html", { replace: true });
+            return;
+        }
+
         renderSummary(summary || {});
     } catch (err) {
         alert("โหลดสรุปผลไม่สำเร็จ: " + err.message);
