@@ -2,14 +2,20 @@
    History Page
    File: frontend/js/history.js
 
-   เวอร์ชันใหม่:
    - ใช้ CVA สำหรับคอยื่น
    - ใช้ FSA สำหรับไหล่ห่อ
-   - ไม่มี warning / เฝ้าระวัง
-   - ไม่มีหลังคร่อม / hunched back
+   - ไม่มี Calibration / Baseline
+   - ไม่มี hunched back / kyphosis
    - แสดงจำนวนแจ้งเตือนรวม
    - รองรับจำนวนแจ้งเตือนแยกคอยื่น / ไหล่ห่อ
    - รองรับ effective_seated_seconds และ fallback สำหรับ session เก่า
+
+   UX minimal-change:
+   1) กันเข้า history ระหว่าง active monitoring
+   2) ถ้า session ยัง active ให้กลับ monitoring
+   3) ถ้าไม่ได้ login ให้กลับ login
+   4) แสดง loading/error ในหน้า ไม่ทำให้หน้าขาว
+   5) ปุ่มเริ่มใช้งานจาก empty state ตรวจ flow ก่อนกลับ setup
 ========================================= */
 
 (function () {
@@ -18,23 +24,70 @@
     const $ = (id) => document.getElementById(id);
 
     let allSessions = [];
+    let isLoading = false;
 
     document.addEventListener("DOMContentLoaded", async () => {
-        const user = utils.requireAuth();
-        if (!user) return;
+        if (!window.api || !window.utils) {
+            renderError(
+                "ระบบ frontend โหลดไม่ครบ",
+                "กรุณาตรวจสอบว่า app.js ถูกเรียกก่อน history.js"
+            );
 
+            window.setTimeout(() => {
+                window.location.replace("login.html");
+            }, 1200);
+
+            return;
+        }
+
+        renderLoading();
         setupControls();
+        setupListDelegation();
+
+        const canViewHistory = await utils.requireHistoryAccess();
+
+        if (!canViewHistory) {
+            return;
+        }
+
+        await loadHistory();
+    });
+
+    /* =========================
+       Load History
+    ========================= */
+
+    async function loadHistory() {
+        if (isLoading) {
+            return;
+        }
+
+        isLoading = true;
+        renderLoading();
 
         try {
+            const user = utils.getCurrentUser();
+
+            if (!user || !user.id) {
+                utils.redirectTo("login.html", { replace: true });
+                return;
+            }
+
             const result = await api.getHistory(user.id, 50);
             allSessions = normalizeSessions(result.sessions || []);
 
             renderHistoryPage();
         } catch (err) {
             console.error("history load error:", err);
-            renderError();
+
+            renderError(
+                "โหลดประวัติไม่สำเร็จ",
+                "โปรดตรวจสอบว่า backend เปิดอยู่ และ endpoint ประวัติการใช้งานทำงานถูกต้อง"
+            );
+        } finally {
+            isLoading = false;
         }
-    });
+    }
 
     /* =========================
        Controls
@@ -51,6 +104,51 @@
         if (sortMode) {
             sortMode.addEventListener("change", renderHistoryPage);
         }
+    }
+
+    function setupListDelegation() {
+        const list = $("historyList");
+
+        if (!list) {
+            return;
+        }
+
+        list.addEventListener("click", async (event) => {
+            const startLink = event.target.closest("[data-start-new-session]");
+
+            if (!startLink) {
+                return;
+            }
+
+            event.preventDefault();
+
+            startLink.setAttribute("aria-disabled", "true");
+            startLink.style.pointerEvents = "none";
+
+            const originalText = startLink.textContent;
+            startLink.textContent = "กำลังตรวจสอบ...";
+
+            try {
+                const canGoSetup = await utils.requireNoActiveMonitoring();
+
+                if (!canGoSetup) {
+                    return;
+                }
+
+                utils.redirectTo("setup.html", { replace: true });
+            } catch (err) {
+                console.error("history start new session error:", err);
+
+                startLink.textContent = originalText;
+                startLink.style.pointerEvents = "";
+                startLink.removeAttribute("aria-disabled");
+
+                renderError(
+                    "ไม่สามารถเริ่มใช้งานใหม่ได้",
+                    "กรุณาตรวจสอบว่า backend เปิดอยู่ แล้วลองอีกครั้ง"
+                );
+            }
+        });
     }
 
     /* =========================
@@ -628,8 +726,24 @@
     }
 
     /* =========================
-       Empty / Error
+       Loading / Empty / Error
     ========================= */
+
+    function renderLoading() {
+        hideSummarySections();
+
+        const list = $("historyList");
+
+        if (!list) {
+            return;
+        }
+
+        list.innerHTML = `
+            <div class="history-loading">
+                กำลังโหลดประวัติการใช้งาน...
+            </div>
+        `;
+    }
 
     function renderEmptyState() {
         hideSummarySections();
@@ -643,12 +757,12 @@
                 <span class="empty-state-desc">
                     เริ่มรอบการใช้งานครั้งแรก เพื่อให้ระบบบันทึกผลการตรวจจับท่าทางและแสดงแนวโน้มย้อนหลัง
                 </span>
-                <a href="setup.html" class="btn-primary">เริ่มใช้งาน</a>
+                <a href="setup.html" class="btn-primary" data-start-new-session="true">เริ่มใช้งาน</a>
             </div>
         `;
     }
 
-    function renderError() {
+    function renderError(title = "โหลดประวัติไม่สำเร็จ", description = "โปรดตรวจสอบว่า backend เปิดอยู่ และ endpoint ประวัติการใช้งานทำงานถูกต้อง") {
         hideSummarySections();
 
         const list = $("historyList");
@@ -656,12 +770,23 @@
 
         list.innerHTML = `
             <div class="empty-state">
-                <span class="empty-state-title">โหลดประวัติไม่สำเร็จ</span>
+                <span class="empty-state-title">${escapeHtml(title)}</span>
                 <span class="empty-state-desc">
-                    โปรดตรวจสอบว่า backend เปิดอยู่ และ endpoint ประวัติการใช้งานทำงานถูกต้อง
+                    ${escapeHtml(description)}
                 </span>
+                <button type="button" class="btn-primary" id="retryHistoryBtn">
+                    ลองโหลดอีกครั้ง
+                </button>
             </div>
         `;
+
+        const retryBtn = $("retryHistoryBtn");
+
+        if (retryBtn) {
+            retryBtn.addEventListener("click", () => {
+                loadHistory();
+            });
+        }
     }
 
     function hideSummarySections() {
@@ -844,5 +969,14 @@
         }
 
         return `${m} นาที`;
+    }
+
+    function escapeHtml(value) {
+        return String(value)
+            .replaceAll("&", "&amp;")
+            .replaceAll("<", "&lt;")
+            .replaceAll(">", "&gt;")
+            .replaceAll('"', "&quot;")
+            .replaceAll("'", "&#039;");
     }
 })();

@@ -8,6 +8,12 @@
    - ไม่มี Calibration / Baseline
    - ไม่มี hunched back / kyphosis
    - แจ้งเตือนเมื่อ backend ส่ง alert จริง
+   - ปรับ UX แบบ minimal-change:
+     1) กันเข้าหน้า monitoring โดยไม่มี active session
+     2) กัน browser back ระหว่าง monitoring
+     3) กันกดปุ่มหยุดซ้ำ
+     4) ถ้า backend หลุด ไม่ล้าง session ทันที
+     5) ถ้า session ไม่ active แล้ว redirect ไป summary อย่างถูกต้อง
 ========================================= */
 
 (function () {
@@ -19,6 +25,7 @@
 
     let sessionEnded = false;
     let videoFrameLoading = false;
+    let isStopping = false;
 
     let notificationEnabled = false;
     let notificationPermissionAsked = false;
@@ -31,11 +38,14 @@
     let elapsedCountingActive = false;
     let lastElapsedTick = null;
 
+    let connectionErrorCount = 0;
+
     const VIDEO_FRAME_INTERVAL = 700;
     const POSTURE_POLL_INTERVAL = 1500;
     const ELAPSED_INTERVAL = 1000;
     const FRONTEND_ALERT_COOLDOWN = 5000;
     const ALERT_DURATION_SECONDS = 180;
+    const CONNECTION_ERROR_VISIBLE_LIMIT = 1;
 
     const CVA_NORMAL_THRESHOLD = 50;
     const FSA_NORMAL_THRESHOLD = 54;
@@ -43,10 +53,20 @@
     const $ = (id) => document.getElementById(id);
 
     document.addEventListener("DOMContentLoaded", async () => {
+        if (!window.api || !window.utils) {
+            alert("ระบบ frontend โหลดไม่ครบ กรุณาตรวจสอบการเรียกไฟล์ app.js");
+            window.location.replace("login.html");
+            return;
+        }
+
         const canMonitor = await utils.requireActiveMonitoringSession();
-        if (!canMonitor) return;
+
+        if (!canMonitor) {
+            return;
+        }
 
         resetLocalState();
+        renderInitialLoadingState();
         lockBrowserBackDuringActiveSession();
         setupVideoStatus();
         setupNotificationToggle();
@@ -57,18 +77,42 @@
     function resetLocalState() {
         sessionEnded = false;
         videoFrameLoading = false;
+        isStopping = false;
+
         lastFrontendAlertTime = 0;
         lastForwardHeadAlertActive = false;
         lastRoundedShoulderAlertActive = false;
+
         displayedElapsedSeconds = 0;
         elapsedCountingActive = false;
         lastElapsedTick = Date.now();
+
+        connectionErrorCount = 0;
 
         setText("elapsedTime", formatTime(0));
         setText("goodTime", formatTime(0));
         setText("forwardHeadAlertCount", "0 ครั้ง");
         setText("roundedShoulderAlertCount", "0 ครั้ง");
         setText("alertCount", "0 ครั้ง");
+    }
+
+    function renderInitialLoadingState() {
+        const cameraStatus = $("cameraStatus");
+
+        if (cameraStatus) {
+            cameraStatus.textContent = "กำลังเชื่อมต่อกล้อง...";
+            cameraStatus.classList.remove("is-active", "is-error");
+        }
+
+        const statusCard = $("statusCard");
+
+        if (statusCard) {
+            statusCard.className = "status-card is-waiting";
+        }
+
+        setText("statusBadge", "กำลังเริ่มระบบ");
+        setText("statusMessage", "Loading monitoring session");
+        setText("currentAdvice", "กรุณารอสักครู่ ระบบกำลังเชื่อมต่อกล้องและอ่านค่าท่าทาง");
     }
 
     /* =========================
@@ -94,10 +138,19 @@
 
         window.addEventListener("popstate", handleMonitoringBackNavigation);
         window.addEventListener("pageshow", handleMonitoringPageShow);
+        window.addEventListener("beforeunload", handleBeforeUnload);
+    }
+
+    function unlockBrowserBackGuard() {
+        window.removeEventListener("popstate", handleMonitoringBackNavigation);
+        window.removeEventListener("pageshow", handleMonitoringPageShow);
+        window.removeEventListener("beforeunload", handleBeforeUnload);
     }
 
     function handleMonitoringBackNavigation() {
-        if (sessionEnded) return;
+        if (sessionEnded) {
+            return;
+        }
 
         if (!utils.isMonitoringSessionActive()) {
             utils.redirectTo("summary.html", { replace: true });
@@ -116,16 +169,39 @@
 
         setText(
             "currentAdvice",
-            "หากต้องการออกจากหน้านี้ กรุณากดปุ่มหยุดการใช้งานก่อน"
+            "หากต้องการออกจากหน้านี้ กรุณากดปุ่มหยุดการใช้งานก่อน เพื่อให้ระบบบันทึกและสรุปผลได้ถูกต้อง"
         );
     }
 
-    function handleMonitoringPageShow(event) {
-        if (!event.persisted || sessionEnded) return;
+    async function handleMonitoringPageShow(event) {
+        if (sessionEnded) {
+            return;
+        }
+
+        if (event.persisted && window.utils) {
+            const canMonitor = await utils.requireActiveMonitoringSession();
+
+            if (!canMonitor) {
+                return;
+            }
+
+            if (!videoInterval && !pollInterval && !elapsedInterval) {
+                startPolling();
+            }
+        }
+    }
+
+    function handleBeforeUnload(event) {
+        if (sessionEnded || isStopping) {
+            return;
+        }
 
         if (!utils.isMonitoringSessionActive()) {
-            utils.redirectTo("summary.html", { replace: true });
+            return;
         }
+
+        event.preventDefault();
+        event.returnValue = "";
     }
 
     /* =========================
@@ -136,9 +212,20 @@
         const stopBtn = $("stopBtn");
         if (!stopBtn) return;
 
+        stopBtn.disabled = false;
+        stopBtn.textContent = "⏹ หยุดการใช้งาน";
+
         stopBtn.addEventListener("click", () => {
             stopSession();
         });
+    }
+
+    function setStopButtonLoading(isLoading) {
+        const stopBtn = $("stopBtn");
+        if (!stopBtn) return;
+
+        stopBtn.disabled = isLoading;
+        stopBtn.textContent = isLoading ? "กำลังหยุด..." : "⏹ หยุดการใช้งาน";
     }
 
     function setupVideoStatus() {
@@ -148,12 +235,16 @@
         if (!video || !cameraStatus) return;
 
         video.addEventListener("load", () => {
+            if (sessionEnded) return;
+
             cameraStatus.textContent = "กล้องทำงานอยู่";
             cameraStatus.classList.add("is-active");
             cameraStatus.classList.remove("is-error");
         });
 
         video.addEventListener("error", () => {
+            if (sessionEnded) return;
+
             cameraStatus.textContent = "ไม่สามารถโหลดภาพจากกล้อง";
             cameraStatus.classList.add("is-error");
             cameraStatus.classList.remove("is-active");
@@ -199,12 +290,19 @@
         toggle.addEventListener("change", async () => {
             if (toggle.checked) {
                 const granted = await requestNotificationPermission();
+
                 notificationEnabled = granted;
                 toggle.checked = granted;
-                if (desc) desc.textContent = granted ? "เปิดอยู่" : "ยังไม่อนุญาต";
+
+                if (desc) {
+                    desc.textContent = granted ? "เปิดอยู่" : "ยังไม่อนุญาต";
+                }
             } else {
                 notificationEnabled = false;
-                if (desc) desc.textContent = "ปิดอยู่";
+
+                if (desc) {
+                    desc.textContent = "ปิดอยู่";
+                }
             }
         });
     }
@@ -232,6 +330,7 @@
 
         if (!notificationPermissionAsked) {
             notificationPermissionAsked = true;
+
             const permission = await Notification.requestPermission();
 
             if (permission === "granted") {
@@ -254,7 +353,9 @@
     ========================= */
 
     function startPolling() {
-        if (videoInterval || pollInterval || elapsedInterval) return;
+        if (videoInterval || pollInterval || elapsedInterval) {
+            return;
+        }
 
         updateVideoFrame();
         updatePosture();
@@ -277,7 +378,10 @@
 
     function updateVideoFrame() {
         const video = $("videoFeed");
-        if (!video || videoFrameLoading || sessionEnded) return;
+
+        if (!video || videoFrameLoading || sessionEnded) {
+            return;
+        }
 
         videoFrameLoading = true;
 
@@ -293,11 +397,22 @@
     }
 
     async function updatePosture() {
-        if (sessionEnded) return;
+        if (sessionEnded || isStopping) {
+            return;
+        }
 
         try {
-            const posture = await api.getCurrentPosture();
-            const summary = await api.getSessionSummary();
+            const [posture, summary] = await Promise.all([
+                api.getCurrentPosture(),
+                api.getSessionSummary(),
+            ]);
+
+            connectionErrorCount = 0;
+
+            if (summary && summary.session_active === false) {
+                handleInactiveBackendSession(summary);
+                return;
+            }
 
             updateElapsedCountingState(posture || {});
             renderPosture(posture || {});
@@ -305,9 +420,29 @@
             handleAlertEvent(posture || {});
         } catch (err) {
             console.error("monitoring polling error:", err);
+
+            connectionErrorCount += 1;
             pauseElapsedTimer();
-            renderConnectionError();
+
+            if (connectionErrorCount >= CONNECTION_ERROR_VISIBLE_LIMIT) {
+                renderConnectionError();
+            }
         }
+    }
+
+    function handleInactiveBackendSession(summary) {
+        if (sessionEnded) {
+            return;
+        }
+
+        sessionEnded = true;
+        pauseElapsedTimer();
+        stopPolling();
+
+        utils.markMonitoringSessionStopped(summary);
+        unlockBrowserBackGuard();
+
+        utils.redirectTo("summary.html", { replace: true });
     }
 
     /* =========================
@@ -317,7 +452,9 @@
     function updateElapsedCountingState(posture) {
         const shouldCount = shouldCountElapsedTime(posture);
 
-        if (elapsedCountingActive === shouldCount) return;
+        if (elapsedCountingActive === shouldCount) {
+            return;
+        }
 
         elapsedCountingActive = shouldCount;
         lastElapsedTick = Date.now();
@@ -325,6 +462,7 @@
 
     function shouldCountElapsedTime(posture) {
         const status = posture.status || "no_person_detected";
+
         return status === "good" || status === "bad";
     }
 
@@ -349,7 +487,9 @@
     }
 
     function updateElapsedTime() {
-        if (sessionEnded) return;
+        if (sessionEnded) {
+            return;
+        }
 
         const now = Date.now();
 
@@ -379,6 +519,7 @@
 
     function renderConnectionError() {
         const cameraStatus = $("cameraStatus");
+
         if (cameraStatus) {
             cameraStatus.textContent = "เชื่อมต่อ backend ไม่ได้";
             cameraStatus.classList.add("is-error");
@@ -386,13 +527,17 @@
         }
 
         const statusCard = $("statusCard");
+
         if (statusCard) {
             statusCard.className = "status-card is-waiting";
         }
 
         setText("statusBadge", "รอการเชื่อมต่อ");
         setText("statusMessage", "Backend connection failed");
-        setText("currentAdvice", "ตรวจสอบว่า backend เปิดอยู่ แล้ว refresh หน้าอีกครั้ง");
+        setText(
+            "currentAdvice",
+            "ตรวจสอบว่า backend เปิดอยู่ แล้วรอสักครู่หรือ refresh หน้าอีกครั้ง ระบบจะยังไม่ล้าง session ทันที"
+        );
     }
 
     function renderPosture(posture) {
@@ -501,6 +646,7 @@
         } = options;
 
         const card = $(cardId);
+
         if (card) {
             card.classList.remove("is-normal", "is-warning", "is-danger");
 
@@ -529,9 +675,10 @@
             setText(stateId, normalText);
         }
 
-        const progress = isBad || isActive
-            ? Math.min((Number(duration || 0) / ALERT_DURATION_SECONDS) * 100, 100)
-            : 0;
+        const progress =
+            isBad || isActive
+                ? Math.min((Number(duration || 0) / ALERT_DURATION_SECONDS) * 100, 100)
+                : 0;
 
         setWidth(barId, `${progress.toFixed(0)}%`);
     }
@@ -563,16 +710,24 @@
         const forwardHeadAlertActive = posture.forward_head_alert_active === true;
         const roundedShoulderAlertActive = posture.rounded_shoulder_alert_active === true;
 
-        const directAlert = posture.alert === true || forwardHeadAlert || roundedShoulderAlert;
+        const directAlert =
+            posture.alert === true || forwardHeadAlert || roundedShoulderAlert;
 
-        const becameForwardHeadActive = forwardHeadAlertActive && !lastForwardHeadAlertActive;
-        const becameRoundedShoulderActive = roundedShoulderAlertActive && !lastRoundedShoulderAlertActive;
+        const becameForwardHeadActive =
+            forwardHeadAlertActive && !lastForwardHeadAlertActive;
+
+        const becameRoundedShoulderActive =
+            roundedShoulderAlertActive && !lastRoundedShoulderAlertActive;
 
         lastForwardHeadAlertActive = forwardHeadAlertActive;
         lastRoundedShoulderAlertActive = roundedShoulderAlertActive;
 
-        const shouldNotify = directAlert || becameForwardHeadActive || becameRoundedShoulderActive;
-        if (!shouldNotify) return;
+        const shouldNotify =
+            directAlert || becameForwardHeadActive || becameRoundedShoulderActive;
+
+        if (!shouldNotify) {
+            return;
+        }
 
         if (now - lastFrontendAlertTime < FRONTEND_ALERT_COOLDOWN) {
             return;
@@ -581,6 +736,7 @@
         lastFrontendAlertTime = now;
 
         const alertMessage = buildPostureAlertMessage(posture);
+
         showBrowserNotification(alertMessage);
 
         if (window.alertSpeech) {
@@ -593,20 +749,30 @@
         if (!("Notification" in window)) return;
         if (Notification.permission !== "granted") return;
 
-        new Notification("PostureGuard AI", {
-            body: message || "กรุณาปรับท่านั่งให้อยู่ในท่าที่เหมาะสม",
-            silent: false,
-        });
+        try {
+            new Notification("PostureGuard AI", {
+                body: message || "กรุณาปรับท่านั่งให้อยู่ในท่าที่เหมาะสม",
+                silent: false,
+            });
+        } catch (err) {
+            console.warn("Cannot show browser notification:", err);
+        }
     }
 
     function buildPostureAlertMessage(posture) {
         const issues = [];
 
-        if (posture.forward_head_alert === true || posture.forward_head_alert_active === true) {
+        if (
+            posture.forward_head_alert === true ||
+            posture.forward_head_alert_active === true
+        ) {
             issues.push("ท่านั่งของคุณมีแนวโน้มคอยื่น");
         }
 
-        if (posture.rounded_shoulder_alert === true || posture.rounded_shoulder_alert_active === true) {
+        if (
+            posture.rounded_shoulder_alert === true ||
+            posture.rounded_shoulder_alert_active === true
+        ) {
             issues.push("ท่านั่งของคุณมีแนวโน้มไหล่ห่อ");
         }
 
@@ -622,6 +788,7 @@
 
         if (posture.is_forward_head === true) {
             const duration = Number(posture.forward_head_duration || 0);
+
             issues.push(
                 posture.forward_head_alert_active === true
                     ? "คอยื่น: แจ้งเตือนแล้ว"
@@ -631,6 +798,7 @@
 
         if (posture.is_rounded_shoulder === true) {
             const duration = Number(posture.rounded_shoulder_duration || 0);
+
             issues.push(
                 posture.rounded_shoulder_alert_active === true
                     ? "ไหล่ห่อ: แจ้งเตือนแล้ว"
@@ -690,17 +858,20 @@
     ========================= */
 
     async function stopSession() {
-        if (sessionEnded) return;
+        if (sessionEnded || isStopping) {
+            return;
+        }
 
+        isStopping = true;
         sessionEnded = true;
+
         pauseElapsedTimer();
         stopPolling();
+        setStopButtonLoading(true);
 
-        const stopBtn = $("stopBtn");
-        if (stopBtn) {
-            stopBtn.disabled = true;
-            stopBtn.textContent = "กำลังหยุด...";
-        }
+        setText("statusBadge", "กำลังสรุปผล");
+        setText("statusMessage", "Stopping monitoring session");
+        setText("currentAdvice", "กรุณารอสักครู่ ระบบกำลังบันทึกและสรุปผลการใช้งาน");
 
         try {
             if (window.alertSpeech) {
@@ -716,20 +887,56 @@
             }
 
             utils.markMonitoringSessionStopped(summary);
-            window.removeEventListener("popstate", handleMonitoringBackNavigation);
-            window.removeEventListener("pageshow", handleMonitoringPageShow);
+            unlockBrowserBackGuard();
 
             utils.redirectTo("summary.html", { replace: true });
         } catch (err) {
-            alert("หยุด session ไม่สำเร็จ: " + err.message);
+            console.warn("Stop session error:", err);
 
-            if (stopBtn) {
-                stopBtn.disabled = false;
-                stopBtn.textContent = "⏹ หยุดการใช้งาน";
+            const recovered = await recoverFromStopSessionError(err);
+
+            if (recovered) {
+                return;
             }
 
+            alert(
+                "หยุด session ไม่สำเร็จ\n\n" +
+                "สาเหตุ: " + err.message + "\n\n" +
+                "กรุณาตรวจสอบว่า backend ยังทำงานอยู่ แล้วลองกดหยุดอีกครั้ง"
+            );
+
+            isStopping = false;
             sessionEnded = false;
+
+            setStopButtonLoading(false);
             startPolling();
+        }
+    }
+
+    async function recoverFromStopSessionError(err) {
+        const message = String(err?.message || "");
+
+        if (!message.includes("No active session")) {
+            return false;
+        }
+
+        try {
+            const summary = await api.getSessionSummary();
+
+            try {
+                await api.stopCamera();
+            } catch (cameraErr) {
+                console.warn("Cannot stop camera while recovering:", cameraErr);
+            }
+
+            utils.markMonitoringSessionStopped(summary);
+            unlockBrowserBackGuard();
+
+            utils.redirectTo("summary.html", { replace: true });
+            return true;
+        } catch (summaryErr) {
+            console.warn("Cannot recover stop session error:", summaryErr);
+            return false;
         }
     }
 
@@ -743,12 +950,17 @@
         }
 
         const n = Number(value);
+
         return Number.isFinite(n) ? n : NaN;
     }
 
     function formatMetric(value) {
         const n = normalizeNumber(value);
-        if (!Number.isFinite(n)) return "—";
+
+        if (!Number.isFinite(n)) {
+            return "—";
+        }
+
         return n.toFixed(1);
     }
 
@@ -767,15 +979,23 @@
 
     function setWidth(id, value) {
         const el = $(id);
-        if (!el) return;
+
+        if (!el) {
+            return;
+        }
+
         el.style.width = value;
     }
 
     function setText(id, value) {
         const el = $(id);
-        if (!el) return;
+
+        if (!el) {
+            return;
+        }
 
         const text = String(value);
+
         if (el.textContent !== text) {
             el.textContent = text;
         }
