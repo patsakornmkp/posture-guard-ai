@@ -1,9 +1,10 @@
 # state.py
 # จัดการ state ทั้งหมดของระบบ (in-memory)
 #
-# เวอร์ชันใหม่:
+# เวอร์ชันนี้:
 # - ใช้ CVA สำหรับภาวะคอยื่น
 # - ใช้ FSA สำหรับภาวะไหล่ห่อ
+# - ไม่ใช้ Calibration / Baseline แล้ว
 # - ลบ logic หลังคร่อม / hunched back ออกจาก state หลัก
 # - ไม่ใช้ hip landmark เป็นเงื่อนไขหลัก
 # - นับเวลา "ท่าทางเหมาะสม" ต่อไปจนกว่าปัญหาจะถูกแจ้งเตือนจริง
@@ -32,47 +33,7 @@ except Exception as err:
 
 
 # ========================
-# 1. Calibration State
-# ========================
-
-class CalibrationState:
-    """เก็บ baseline posture ของ user"""
-
-    def __init__(self) -> None:
-        self.baseline_cva: Optional[float] = None
-        self.baseline_fsa: Optional[float] = None
-
-    def set(self, cva: Optional[float], fsa: Optional[float]) -> bool:
-        """
-        บันทึก baseline จากท่านั่งที่ผู้ใช้ถือว่าเป็นท่าที่ถูกต้อง
-
-        ต้องมีทั้ง:
-        - cva = มุมคอยื่น
-        - fsa = มุมไหล่ห่อ
-        """
-        if cva is None or fsa is None:
-            return False
-
-        self.baseline_cva = cva
-        self.baseline_fsa = fsa
-        return True
-
-    def clear(self) -> None:
-        self.baseline_cva = None
-        self.baseline_fsa = None
-
-    def as_dict(self) -> Optional[Dict[str, float]]:
-        if self.baseline_cva is None and self.baseline_fsa is None:
-            return None
-
-        return {
-            "cva_angle": self.baseline_cva,
-            "fsa_angle": self.baseline_fsa,
-        }
-
-
-# ========================
-# 2. Session State
+# 1. Session State
 # ========================
 
 class SessionState:
@@ -84,24 +45,16 @@ class SessionState:
         self.planned_minutes: Optional[int] = None
         self.start_time: Optional[float] = None
 
-        # เวลาสะสมตามสถานะรวม
         self.good_seconds: float = 0.0
         self.bad_seconds: float = 0.0
 
-        # เวลาสะสมตามสาเหตุจริง
-        # จะเริ่มนับเฉพาะหลังจาก issue นั้น active แล้ว
-        # เช่น คอยื่นต่อเนื่องครบเวลาที่กำหนดแล้ว
         self.forward_head_seconds: float = 0.0
         self.rounded_shoulder_seconds: float = 0.0
 
-        # จำนวนแจ้งเตือนแยกตามสาเหตุ
         self.forward_head_alert_count: int = 0
         self.rounded_shoulder_alert_count: int = 0
 
-        # เวลาที่ตรวจเจอคนนั่งจริง
         self.effective_seconds: float = 0.0
-
-        # จำนวนแจ้งเตือนรวม
         self.alert_count: int = 0
 
         self._last_tick_time: Optional[float] = None
@@ -109,7 +62,6 @@ class SessionState:
 
     def start(self, user_id: int, planned_minutes: int) -> int:
         """เริ่ม session ใหม่"""
-
         session_id = db.create_session(user_id, planned_minutes)
 
         self.session_id = session_id
@@ -136,7 +88,6 @@ class SessionState:
 
     def stop(self) -> Optional[Dict[str, Any]]:
         """จบ session และคืน summary"""
-
         if self.session_id is None:
             return None
 
@@ -184,7 +135,6 @@ class SessionState:
         - นับ rounded_shoulder_seconds เฉพาะเมื่อไหล่ห่อ active แล้ว
         - นับ alert แยกตาม forward_head_alert / rounded_shoulder_alert
         """
-
         if self.session_id is None:
             return
 
@@ -198,11 +148,9 @@ class SessionState:
         delta = now - self._last_tick_time
         self._last_tick_time = now
 
-        # ถ้าไม่เจอคนหรือหยุดชั่วคราว ไม่ต้องนับเวลา
         if status in [Status.NO_PERSON, Status.PAUSED]:
             return
 
-        # เวลาที่ตรวจเจอคนนั่งจริง
         self.effective_seconds += delta
 
         has_active_issue = (
@@ -210,7 +158,6 @@ class SessionState:
             or rounded_shoulder_alert_active
         )
 
-        # ถ้ายังไม่ครบเวลาแจ้งเตือน ยังนับเป็นท่าทางเหมาะสม
         if not has_active_issue:
             self.good_seconds += delta
         else:
@@ -222,7 +169,6 @@ class SessionState:
             if rounded_shoulder_alert_active:
                 self.rounded_shoulder_seconds += delta
 
-        # นับจำนวนแจ้งเตือนแยกประเภท
         if forward_head_alert:
             self.forward_head_alert_count += 1
             self.alert_count += 1
@@ -231,7 +177,6 @@ class SessionState:
             self.rounded_shoulder_alert_count += 1
             self.alert_count += 1
 
-        # fallback เผื่อมีโค้ดเก่าที่ส่ง alerted=True
         if (
             alerted
             and not forward_head_alert
@@ -247,7 +192,6 @@ class SessionState:
 
     def _calculate_risk(self) -> str:
         """คำนวณระดับความเสี่ยง"""
-
         if self.effective_seconds <= 0:
             return "low"
 
@@ -268,7 +212,6 @@ class SessionState:
 
     def get_summary(self) -> Dict[str, Any]:
         """คืนข้อมูลสรุป session"""
-
         active = self.session_id is not None
 
         actual_duration = (
@@ -314,7 +257,7 @@ class SessionState:
 
 
 # ========================
-# 3. Camera Thread
+# 2. Camera Thread
 # ========================
 
 class CameraThread:
@@ -325,12 +268,10 @@ class CameraThread:
         detector: PoseDetector,
         classifier: PostureClassifier,
         session: SessionState,
-        calibration: CalibrationState,
     ) -> None:
         self._detector = detector
         self._classifier = classifier
         self._session = session
-        self._calibration = calibration
 
         self._cap: Optional[cv2.VideoCapture] = None
         self._thread: Optional[threading.Thread] = None
@@ -341,10 +282,8 @@ class CameraThread:
         self._latest_classification: Optional[ClassificationResult] = None
         self._latest_frame: Optional[np.ndarray] = None
 
-        # Performance
         self._frame_count = 0
 
-        # JPEG cache ลดภาระ cv2.imencode ซ้ำ ๆ
         self._latest_jpeg: Optional[bytes] = None
         self._latest_jpeg_time: float = 0.0
         self._frame_version: int = 0
@@ -352,7 +291,6 @@ class CameraThread:
 
     def start(self) -> bool:
         """เปิดกล้องและเริ่ม thread"""
-
         if self._running:
             return True
 
@@ -365,8 +303,6 @@ class CameraThread:
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, config.CAMERA_WIDTH)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, config.CAMERA_HEIGHT)
         cap.set(cv2.CAP_PROP_FPS, config.CAMERA_FPS)
-
-        # ลด buffer กล้อง เพื่อลดอาการภาพดีเลย์
         cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
         self._cap = cap
@@ -383,7 +319,6 @@ class CameraThread:
 
     def stop(self) -> None:
         """หยุดกล้องและ thread"""
-
         self._running = False
 
         if self._thread is not None:
@@ -409,7 +344,6 @@ class CameraThread:
 
     def _loop(self) -> None:
         """loop อ่านภาพจากกล้อง"""
-
         process_every = max(
             1,
             int(getattr(config, "PROCESS_EVERY_N_FRAMES", 2)),
@@ -424,7 +358,6 @@ class CameraThread:
 
             self._frame_count += 1
 
-            # ไม่ต้องให้ MediaPipe ทำงานทุกเฟรม
             if self._frame_count % process_every != 0:
                 continue
 
@@ -463,8 +396,6 @@ class CameraThread:
                 ),
             )
 
-            # สำคัญ: อย่าบันทึก database บน camera loop โดยตรง
-            # เพราะตอน alert จะทำให้วิดีโอกระตุก
             if classification.alert and self._session.session_id is not None:
                 self._save_alert_async(detection, classification)
 
@@ -480,11 +411,9 @@ class CameraThread:
                 self._latest_frame = output_frame
                 self._frame_version += 1
 
-                # frame เปลี่ยนแล้ว cache JPEG เดิมถือว่าเก่า
                 self._latest_jpeg = None
                 self._encoded_frame_version = -1
 
-            # กัน loop กิน CPU เต็มเกินไป
             time.sleep(0.001)
 
     def _save_alert_async(
@@ -493,7 +422,6 @@ class CameraThread:
         classification: ClassificationResult,
     ) -> None:
         """บันทึก alert แยก thread เพื่อลดอาการวิดีโอกระตุกตอนแจ้งเตือน"""
-
         thread = threading.Thread(
             target=self._save_alert,
             args=(detection, classification),
@@ -507,7 +435,6 @@ class CameraThread:
         classification: ClassificationResult,
     ) -> None:
         """บันทึก alert และ posture log แยกตามประเภท"""
-
         session_id = self._session.session_id
 
         if session_id is None:
@@ -529,7 +456,6 @@ class CameraThread:
                 getattr(classification, "rounded_shoulder_duration", 0.0),
             ))
 
-        # fallback เผื่อโค้ดเก่ามีแค่ classification.alert
         if not alert_items and classification.alert:
             issue_type = self._issue_type_of(classification)
 
@@ -539,8 +465,6 @@ class CameraThread:
                 classification.bad_posture_duration,
             ))
 
-        # ส่ง LINE notification หนึ่งครั้งต่อหนึ่งจังหวะ alert
-        # ถ้าคอยื่นและไหล่ห่อ alert พร้อมกัน จะส่งข้อความแบบ multiple posture issues
         self._send_line_notification(alert_items=alert_items)
 
         for issue_type, message, duration in alert_items:
@@ -563,7 +487,6 @@ class CameraThread:
         alert_items: List[Tuple[str, str, float]],
     ) -> None:
         """ส่ง LINE notification จาก alert_items โดยไม่ให้ backend crash ถ้าส่งล้มเหลว"""
-
         if not alert_items:
             return
 
@@ -591,13 +514,11 @@ class CameraThread:
                 print(f"[LINE] notification failed: {result}")
 
         except Exception as err:
-            # Fallback สำคัญ: ห้ามให้ LINE error ทำให้ camera/backend crash
             print(f"[LINE] notification error ignored: {err}")
 
     @staticmethod
     def _issue_type_of(c: ClassificationResult) -> str:
         """แปลง classification เป็น issue_type แบบไม่ใช้ประเภทท่าร่วม"""
-
         if getattr(c, "forward_head_alert", False):
             return "forward_head"
 
@@ -622,7 +543,6 @@ class CameraThread:
 
     def get_latest_frame_jpeg(self) -> Optional[bytes]:
         """คืนภาพล่าสุดเป็น JPEG bytes"""
-
         now = time.time()
         cache_seconds = float(getattr(config, "JPEG_CACHE_SECONDS", 0.20))
 
@@ -659,16 +579,3 @@ class CameraThread:
             self._encoded_frame_version = frame_version
 
         return jpeg_bytes
-
-    def calibrate(self) -> bool:
-        """บันทึก baseline จากผลล่าสุด"""
-
-        detection = self.get_latest_detection()
-
-        if detection is None or not detection.person_detected:
-            return False
-
-        return self._calibration.set(
-            cva=detection.cva_angle,
-            fsa=detection.fsa_angle,
-        )

@@ -6,22 +6,25 @@
 #
 # เปิดเอกสาร API ที่: http://localhost:8000/docs
 #
-# เวอร์ชันใหม่:
+# เวอร์ชันนี้:
 # - ใช้ CVA สำหรับภาวะคอยื่น
 # - ใช้ FSA สำหรับภาวะไหล่ห่อ
-# - ลบ field หลังคร่อม / kyphosis / hunched back ออกจาก response หลัก
+# - ไม่ใช้ Calibration / Baseline แล้ว
+# - ไม่ใช้ hunched back / kyphosis เป็น logic หลัก
 # - realtime session mode: ไม่กำหนดเวลาล่วงหน้า
-# - เวลาแจ้งเตือนเมื่อผิดท่าต่อเนื่อง 3 นาที อยู่ใน config.py
+# - เวลาแจ้งเตือนเมื่อผิดท่าต่อเนื่องอยู่ใน config.py
 # - ส่งค่า timer/alert แยกคอยื่นและไหล่ห่อออกไปที่ /posture/current
 # - เพิ่มจำนวนแจ้งเตือนแยกตามสาเหตุ:
 #   forward_head_alert_count
 #   rounded_shoulder_alert_count
 #   alert_count
+# - เพิ่ม LINE webhook/status/test endpoint
 
+import json
 import sqlite3
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, Header, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 
@@ -30,7 +33,12 @@ import database as db
 import schemas
 from detector import PoseDetector
 from classifier import PostureClassifier, Status
-from state import CameraThread, SessionState, CalibrationState
+from state import CameraThread, SessionState
+from notification_service import (
+    get_line_notification_status,
+    handle_line_webhook,
+    send_test_line_notification,
+)
 
 
 # ========================
@@ -40,7 +48,6 @@ from state import CameraThread, SessionState, CalibrationState
 detector: PoseDetector = None
 classifier: PostureClassifier = None
 session_state: SessionState = None
-calibration_state: CalibrationState = None
 camera_thread: CameraThread = None
 
 
@@ -54,14 +61,13 @@ async def lifespan(app: FastAPI):
     - สร้าง detector
     - สร้าง classifier
     - สร้าง session state
-    - สร้าง calibration state
     - สร้าง camera thread
 
     shutdown:
     - ปิดกล้อง
     - ปิด MediaPipe
     """
-    global detector, classifier, session_state, calibration_state, camera_thread
+    global detector, classifier, session_state, camera_thread
 
     # Startup
     db.init_database()
@@ -69,13 +75,11 @@ async def lifespan(app: FastAPI):
     detector = PoseDetector()
     classifier = PostureClassifier()
     session_state = SessionState()
-    calibration_state = CalibrationState()
 
     camera_thread = CameraThread(
         detector=detector,
         classifier=classifier,
         session=session_state,
-        calibration=calibration_state,
     )
 
     print("✓ PostureGuard backend started")
@@ -257,9 +261,7 @@ def get_current_posture():
             bad_posture_duration=0.0,
             alert=False,
             message="Camera is not active",
-            baseline=None,
 
-            # field ใหม่
             forward_head_duration=0.0,
             rounded_shoulder_duration=0.0,
             forward_head_alert=False,
@@ -282,9 +284,7 @@ def get_current_posture():
             bad_posture_duration=0.0,
             alert=False,
             message="Initializing...",
-            baseline=None,
 
-            # field ใหม่
             forward_head_duration=0.0,
             rounded_shoulder_duration=0.0,
             forward_head_alert=False,
@@ -300,13 +300,6 @@ def get_current_posture():
         Status.NO_PERSON: schemas.PostureStatus.NO_PERSON_DETECTED,
     }
 
-    baseline = calibration_state.as_dict()
-    baseline_model = (
-        schemas.BaselineData(**baseline)
-        if baseline
-        else None
-    )
-
     return schemas.PostureResponse(
         status=status_mapping.get(
             classification.status,
@@ -315,24 +308,13 @@ def get_current_posture():
         cva_angle=detection.cva_angle,
         fsa_angle=detection.fsa_angle,
 
-        # มุมปัจจุบันผิดเกณฑ์หรือไม่
         is_forward_head=classification.is_forward_head,
         is_rounded_shoulder=classification.is_rounded_shoulder,
 
-        # เวลาผิดท่าต่อเนื่องสูงสุด
         bad_posture_duration=classification.bad_posture_duration,
-
-        # alert รวม
         alert=classification.alert,
-
         message=classification.message,
-        baseline=baseline_model,
 
-        # ========================
-        # New fields from classifier.py
-        # ========================
-
-        # timer แยกของคอยื่น / ไหล่ห่อ
         forward_head_duration=getattr(
             classification,
             "forward_head_duration",
@@ -344,7 +326,6 @@ def get_current_posture():
             0.0,
         ),
 
-        # true เฉพาะรอบที่ต้องแจ้งเตือน
         forward_head_alert=getattr(
             classification,
             "forward_head_alert",
@@ -356,7 +337,6 @@ def get_current_posture():
             False,
         ),
 
-        # true หลังปัญหานั้นผิดท่าต่อเนื่องครบ 3 นาทีแล้ว
         forward_head_alert_active=getattr(
             classification,
             "forward_head_alert_active",
@@ -395,43 +375,6 @@ def get_video_frame():
     return Response(
         content=jpeg_bytes,
         media_type="image/jpeg",
-    )
-
-
-# ========================
-# Calibration
-# ========================
-
-@app.post("/calibrate", response_model=schemas.CalibrateResponse)
-def calibrate():
-    """
-    บันทึก baseline จากท่าทางปัจจุบัน
-
-    ผู้ใช้ควรนั่งในท่าทางที่ถูกต้องก่อนเรียก endpoint นี้
-    ระบบจะบันทึก:
-    - baseline CVA
-    - baseline FSA
-    """
-    if not camera_thread.is_running():
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Camera must be active before calibration",
-        )
-
-    success = camera_thread.calibrate()
-
-    if not success:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot calibrate — no person detected or landmarks incomplete",
-        )
-
-    baseline = calibration_state.as_dict()
-
-    return schemas.CalibrateResponse(
-        success=True,
-        message="Baseline saved",
-        baseline=schemas.BaselineData(**baseline),
     )
 
 
@@ -535,6 +478,123 @@ def get_session_logs(session_id: int):
 
 
 # ========================
+# LINE notification endpoints
+# ========================
+
+@app.get("/notification/line/status", response_model=dict)
+def get_line_status():
+    """
+    ตรวจสอบสถานะ LINE Messaging API
+
+    ใช้สำหรับเช็คว่า backend อ่านค่า LINE จาก backend/.env ได้ครบหรือไม่
+    โดยไม่เปิดเผย channel access token / channel secret ออกไปใน response
+    """
+    try:
+        line_status = get_line_notification_status()
+
+        return {
+            "success": True,
+            "line": line_status,
+            "message": "LINE notification status loaded",
+        }
+
+    except Exception as err:
+        # ห้ามให้ปัญหา LINE ทำให้ backend หลักล้ม
+        return {
+            "success": False,
+            "line": None,
+            "message": "Cannot load LINE notification status",
+            "detail": str(err),
+        }
+
+
+@app.post("/notification/test-line", response_model=dict)
+def test_line_notification():
+    """
+    ส่งข้อความทดสอบ LINE แบบ manual
+
+    endpoint นี้ใช้ force=True ภายใน notification_service
+    เพื่อทดสอบว่าส่ง push message ได้จริงหรือไม่
+    โดยไม่เกี่ยวกับ timer ของ classifier และไม่บันทึกเป็น posture alert
+    """
+    try:
+        result = send_test_line_notification()
+
+        return {
+            "success": bool(result.get("success")),
+            "result": result,
+            "message": result.get("message", "LINE test completed"),
+        }
+
+    except Exception as err:
+        # LINE ล้มเหลวต้องไม่ทำให้ browser/backend crash
+        return {
+            "success": False,
+            "result": None,
+            "message": "LINE test notification failed",
+            "detail": str(err),
+        }
+
+
+@app.post("/line/webhook", response_model=dict)
+async def line_webhook(
+    request: Request,
+    x_line_signature: str = Header(default="", alias="x-line-signature"),
+):
+    """
+    รับ webhook จาก LINE Messaging API
+
+    ใช้สำหรับ:
+    - ตรวจสอบ signature จาก LINE ถ้า LINE_VERIFY_WEBHOOK_SIGNATURE=true
+    - ดึง source.userId จาก event
+    - บันทึก LINE_USER_ID ลง backend/.env อัตโนมัติ
+
+    หมายเหตุ:
+    - ต้องใช้ raw body เดิมในการตรวจ signature
+    - ถ้า LINE webhook ผิดพลาด จะตอบ error แบบควบคุมได้ ไม่ปล่อยให้ backend crash
+    """
+    raw_body = await request.body()
+
+    try:
+        payload = json.loads(raw_body.decode("utf-8") or "{}")
+    except json.JSONDecodeError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid JSON payload from LINE webhook",
+        )
+
+    verify_signature = bool(
+        getattr(config, "LINE_VERIFY_WEBHOOK_SIGNATURE", True)
+    )
+
+    try:
+        result = handle_line_webhook(
+            payload=payload,
+            raw_body=raw_body,
+            signature=x_line_signature,
+            verify_signature=verify_signature,
+        )
+    except Exception as err:
+        # กันไม่ให้ webhook ทำ backend หลัก crash
+        return {
+            "success": False,
+            "signature_valid": None,
+            "user_ids": [],
+            "saved_user_id": None,
+            "message": "LINE webhook handling failed",
+            "detail": str(err),
+        }
+
+    if verify_signature and not result.get("success"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=result,
+        )
+
+    return result
+
+
+# ========================
 # Helper
 # ========================
 
@@ -567,11 +627,9 @@ def _summary_to_response(
         good_posture_seconds=summary["good_posture_seconds"],
         bad_posture_seconds=summary["bad_posture_seconds"],
 
-        # เวลาสะสมตามสาเหตุจริง
         forward_head_seconds=summary["forward_head_seconds"],
         rounded_shoulder_seconds=summary["rounded_shoulder_seconds"],
 
-        # จำนวนแจ้งเตือนแยกตามประเภท
         forward_head_alert_count=summary.get(
             "forward_head_alert_count",
             0,
@@ -581,10 +639,9 @@ def _summary_to_response(
             0,
         ),
 
-        # จำนวนแจ้งเตือนรวม
         alert_count=summary["alert_count"],
-
         bad_posture_ratio=summary["bad_posture_ratio"],
+
         current_status=status_mapping.get(
             summary["current_status"],
             schemas.PostureStatus.NO_PERSON_DETECTED,

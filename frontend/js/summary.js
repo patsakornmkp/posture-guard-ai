@@ -1,8 +1,22 @@
+/* =========================================
+   Summary Page
+   File: frontend/js/summary.js
+
+   ใช้แสดง dashboard หลังจบ session
+   - แสดง score / risk / KPI
+   - แยกคอยื่นและไหล่ห่อ
+   - ไม่มี Calibration / Baseline
+========================================= */
+
 const $ = (id) => document.getElementById(id);
+
+const ALERT_DURATION_SECONDS = 180;
 
 document.addEventListener("DOMContentLoaded", async () => {
     const canViewSummary = await utils.requireSummaryAccess();
     if (!canViewSummary) return;
+
+    setupActions();
 
     const cachedSummary = utils.getLastSessionSummary();
 
@@ -25,6 +39,14 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
 });
 
+function setupActions() {
+    const printBtn = $("printReportBtn");
+
+    if (printBtn) {
+        printBtn.addEventListener("click", () => window.print());
+    }
+}
+
 function renderSummary(summary) {
     const total = Number(summary.actual_duration_seconds || 0);
     const effective = Number(summary.effective_seated_seconds || 0);
@@ -43,13 +65,15 @@ function renderSummary(summary) {
     const forwardPct = percent(forward, effective);
     const roundedPct = percent(rounded, effective);
 
+    const issueSeconds = forward + rounded || bad;
     const issuePct = summary.bad_posture_ratio != null
         ? Number(summary.bad_posture_ratio) * 100
-        : percent(bad, effective);
+        : percent(issueSeconds, effective);
 
     const score = calculateScore({
         totalSeconds: total,
         effectiveSeconds: effective,
+        issuePct,
         alerts,
     });
 
@@ -58,6 +82,9 @@ function renderSummary(summary) {
 
     renderOverview({
         effective,
+        good,
+        goodPct,
+        issueSeconds,
         issuePct,
         alerts,
         forwardAlerts,
@@ -93,40 +120,23 @@ function renderSummary(summary) {
         alerts,
         forwardAlerts,
         roundedAlerts,
+        effective,
     });
 }
 
-function calculateScore({ totalSeconds, effectiveSeconds, alerts }) {
-    /*
-       สูตรคะแนน:
-
-       จำนวนแจ้งเตือนสูงสุด = เวลาที่ใช้งานจริง / 180 วินาที
-       คะแนน = 100 - ((จำนวนแจ้งเตือนจริง / จำนวนแจ้งเตือนสูงสุด) * 60)
-       คะแนนสุดท้าย = max(40, คะแนน)
-
-       หมายเหตุ:
-       - ใช้ effectiveSeconds ก่อน เพื่อให้คะแนนอิงเฉพาะเวลาที่ผู้ใช้อยู่ในกล้องจริง
-       - ถ้า effectiveSeconds ไม่มีค่า จะ fallback ไปใช้ totalSeconds
-       - 180 วินาที = 3 นาที
-       - 60 คือคะแนนหักสูงสุด
-       - ถ้านั่งผิดตลอดทั้ง session คะแนนจะลดจาก 100 เหลือ 40
-    */
-
+function calculateScore({ totalSeconds, effectiveSeconds, issuePct, alerts }) {
     const durationSeconds = Number(effectiveSeconds || totalSeconds || 0);
     const alertCount = Number(alerts || 0);
+    const issueRatio = Math.min(Number(issuePct || 0) / 100, 1);
 
     if (durationSeconds <= 0) {
         return 100;
     }
 
-    const maxAlertCount = durationSeconds / 180;
-
-    if (maxAlertCount <= 0) {
-        return 100;
-    }
-
+    const maxAlertCount = Math.max(durationSeconds / ALERT_DURATION_SECONDS, 1);
     const alertRatio = Math.min(alertCount / maxAlertCount, 1);
-    const rawScore = 100 - (alertRatio * 60);
+
+    const rawScore = 100 - (alertRatio * 45) - (issueRatio * 25);
     const finalScore = Math.max(40, rawScore);
 
     return Math.round(finalScore);
@@ -144,6 +154,9 @@ function renderDate() {
 
 function renderOverview({
     effective,
+    good,
+    goodPct,
+    issueSeconds,
     issuePct,
     alerts,
     forwardAlerts,
@@ -151,9 +164,13 @@ function renderOverview({
     riskLevel,
 }) {
     setText("sumEffective", formatTime(effective));
+    setText("sumGood", formatTime(good));
+    setText("sumGoodRatio", `${goodPct.toFixed(0)}%`);
     setText("sumIssueRatio", `${issuePct.toFixed(0)}%`);
+    setText("sumIssueTime", formatTime(issueSeconds));
 
     setText("sumAlerts", `${alerts} ครั้ง`);
+    setText("sumAlertsInline", `${alerts} ครั้ง`);
     setText("sumForwardAlerts", `${forwardAlerts} ครั้ง`);
     setText("sumRoundedAlerts", `${roundedAlerts} ครั้ง`);
 
@@ -181,7 +198,7 @@ function renderPostureAnalysis({
     forwardAlerts,
     roundedAlerts,
 }) {
-    setText("sumGood", formatTime(good));
+    setText("sumGoodTimeInline", formatTime(good));
 
     setText("sumForwardAlertCount", `${forwardAlerts} ครั้ง`);
     setText("sumRoundedAlertCount", `${roundedAlerts} ครั้ง`);
@@ -215,19 +232,19 @@ function renderScore(score) {
     if (score >= 85) {
         grade = "ดีมาก";
         color = "#1D9E75";
-        msg = "นั่งอยู่ในท่าปกติเป็นส่วนใหญ่ มีการแจ้งเตือนน้อยมากหรือไม่มีเลย";
+        msg = "ท่าทางโดยรวมอยู่ในเกณฑ์ดี มีการแจ้งเตือนน้อย เหมาะสำหรับแสดงผลว่า session นี้มีความเสี่ยงต่ำ";
     } else if (score >= 70) {
         grade = "พอใช้";
         color = "#2F8F7B";
-        msg = "มีบางช่วงที่นั่งผิดท่า แต่ยังไม่รุนแรงมาก";
+        msg = "มีบางช่วงที่ค่ามุมไม่อยู่ในเกณฑ์ แต่ยังไม่รุนแรงมาก ควรปรับท่านั่งเป็นระยะ";
     } else if (score >= 50) {
         grade = "ควรปรับปรุง";
         color = "#D4A017";
-        msg = "มีการนั่งผิดท่าหลายช่วง ควรปรับหน้าจอ เก้าอี้ และท่านั่ง";
+        msg = "มีการแจ้งเตือนหรือช่วงผิดท่าหลายครั้ง ควรปรับหน้าจอ เก้าอี้ และตำแหน่งไหล่";
     } else {
-        grade = "อันตราย";
+        grade = "เสี่ยงสูง";
         color = "#C73E3E";
-        msg = "นั่งผิดท่าต่อเนื่องหรือมีการแจ้งเตือนบ่อย ควรพักและปรับท่าทางทันที";
+        msg = "พบความเสี่ยงค่อนข้างสูง ควรพักและปรับสภาพแวดล้อมก่อนเริ่มใช้งานต่อ";
     }
 
     setText("scoreGrade", grade);
@@ -259,42 +276,42 @@ function renderInsight({
 
     if (issuePct < 10 && alerts === 0) {
         title.textContent = "ท่าทางโดยรวมอยู่ในเกณฑ์ปกติ";
-        desc.textContent = "ไม่พบการแจ้งเตือนในรอบนี้ และค่ามุมส่วนใหญ่ยังอยู่ในเกณฑ์ปกติ";
+        desc.textContent = "ไม่พบการแจ้งเตือนในรอบนี้ และเวลาส่วนใหญ่ถูกจัดอยู่ในสถานะท่าทางเหมาะสม";
         return;
     }
 
     if (forwardAlerts > roundedAlerts && forwardAlerts > 0) {
-        title.textContent = "แจ้งเตือนคอยื่นเป็นหลัก";
-        desc.textContent = `ระบบแจ้งเตือนคอยื่น ${forwardAlerts} ครั้ง โดยค่ามุมคอไม่อยู่ในเกณฑ์ปกติประมาณ ${forwardPct.toFixed(0)}% ของเวลาที่ใช้งานจริง ควรปรับหน้าจอให้อยู่ระดับสายตาและดึงคางกลับเป็นระยะ`;
+        title.textContent = "ปัญหาหลักคือคอยื่น";
+        desc.textContent = `ระบบแจ้งเตือนคอยื่น ${forwardAlerts} ครั้ง และพบเวลาคอยื่นประมาณ ${forwardPct.toFixed(0)}% ของเวลาที่ใช้งานจริง ควรปรับจอให้อยู่ระดับสายตาและดึงคางกลับเป็นระยะ`;
         return;
     }
 
     if (roundedAlerts > forwardAlerts && roundedAlerts > 0) {
-        title.textContent = "แจ้งเตือนไหล่ห่อเป็นหลัก";
-        desc.textContent = `ระบบแจ้งเตือนไหล่ห่อ ${roundedAlerts} ครั้ง โดยค่ามุมไหล่ไม่อยู่ในเกณฑ์ปกติประมาณ ${roundedPct.toFixed(0)}% ของเวลาที่ใช้งานจริง ควรดึงหัวไหล่กลับ เปิดอก และจัดตำแหน่งไหล่ให้เหมาะสม`;
+        title.textContent = "ปัญหาหลักคือไหล่ห่อ";
+        desc.textContent = `ระบบแจ้งเตือนไหล่ห่อ ${roundedAlerts} ครั้ง และพบเวลาไหล่ห่อประมาณ ${roundedPct.toFixed(0)}% ของเวลาที่ใช้งานจริง ควรเปิดอก ดึงหัวไหล่กลับ และจัดโต๊ะให้อยู่ในระยะเหมาะสม`;
         return;
     }
 
     if (forwardAlerts > 0 || roundedAlerts > 0) {
-        title.textContent = "มีการแจ้งเตือนมากกว่า 1 ประเภท";
-        desc.textContent = `รอบนี้มีการแจ้งเตือนรวม ${alerts} ครั้ง แบ่งเป็นคอยื่น ${forwardAlerts} ครั้ง และไหล่ห่อ ${roundedAlerts} ครั้ง ควรตรวจตำแหน่งหน้าจอ เก้าอี้ และท่านั่งระหว่างใช้งาน`;
+        title.textContent = "พบการแจ้งเตือนมากกว่า 1 ประเภท";
+        desc.textContent = `รอบนี้มีการแจ้งเตือนรวม ${alerts} ครั้ง แบ่งเป็นคอยื่น ${forwardAlerts} ครั้ง และไหล่ห่อ ${roundedAlerts} ครั้ง แสดงว่าควรปรับทั้งตำแหน่งศีรษะและหัวไหล่`;
         return;
     }
 
     if (forward > rounded * 1.2) {
-        title.textContent = "พบค่ามุมคอไม่อยู่ในเกณฑ์ปกติเป็นหลัก";
-        desc.textContent = `ค่ามุมคอไม่อยู่ในเกณฑ์ปกติประมาณ ${forwardPct.toFixed(0)}% ของเวลาที่ใช้งานจริง แต่ยังไม่มีการแจ้งเตือน อาจเป็นเพราะยังไม่ผิดท่าต่อเนื่องครบเวลาที่กำหนด`;
+        title.textContent = "พบค่ามุมคอผิดปกติเป็นหลัก";
+        desc.textContent = `ค่ามุม CVA ไม่อยู่ในเกณฑ์ประมาณ ${forwardPct.toFixed(0)}% ของเวลาที่ใช้งานจริง แต่ยังอาจไม่ต่อเนื่องครบเวลาที่กำหนดสำหรับ alert`;
         return;
     }
 
     if (rounded > forward * 1.2) {
-        title.textContent = "พบค่ามุมไหล่ไม่อยู่ในเกณฑ์ปกติเป็นหลัก";
-        desc.textContent = `ค่ามุมไหล่ไม่อยู่ในเกณฑ์ปกติประมาณ ${roundedPct.toFixed(0)}% ของเวลาที่ใช้งานจริง แต่ยังไม่มีการแจ้งเตือน อาจเป็นเพราะยังไม่ผิดท่าต่อเนื่องครบเวลาที่กำหนด`;
+        title.textContent = "พบค่ามุมไหล่ผิดปกติเป็นหลัก";
+        desc.textContent = `ค่ามุม FSA ไม่อยู่ในเกณฑ์ประมาณ ${roundedPct.toFixed(0)}% ของเวลาที่ใช้งานจริง แต่ยังอาจไม่ต่อเนื่องครบเวลาที่กำหนดสำหรับ alert`;
         return;
     }
 
     title.textContent = "พบค่ามุมไม่อยู่ในเกณฑ์ปกติ";
-    desc.textContent = "ระบบพบช่วงเวลาที่ค่ามุมคอหรือค่ามุมไหล่ไม่อยู่ในเกณฑ์ปกติ ควรปรับท่านั่งและพักยืดเหยียดเป็นระยะ";
+    desc.textContent = "ระบบพบช่วงเวลาที่ CVA หรือ FSA ต่ำกว่า threshold ควรปรับท่านั่งและพักยืดเหยียดเป็นระยะ";
 }
 
 function renderRecommendations({
@@ -305,41 +322,61 @@ function renderRecommendations({
     alerts,
     forwardAlerts,
     roundedAlerts,
+    effective,
 }) {
     const recs = [];
 
-    if (score >= 85) {
-        recs.push("ท่าทางโดยรวมอยู่ในเกณฑ์ปกติ ควรรักษาระดับสายตาและตำแหน่งศีรษะกับไหล่ให้เหมาะสม");
+    if (effective <= 0) {
+        recs.push("ไม่พบเวลาที่ระบบตรวจจับผู้ใช้งานได้ชัดเจน ควรตรวจตำแหน่งกล้องและแสงก่อนเริ่มใช้งานใหม่");
+    } else if (score >= 85) {
+        recs.push("ท่าทางโดยรวมอยู่ในเกณฑ์ดี ควรรักษาระดับสายตาและตำแหน่งศีรษะกับไหล่ให้เหมาะสมต่อเนื่อง");
     } else if (score >= 70) {
-        recs.push("ควรพักสายตาและยืดเหยียดคอ ไหล่ และสะบักทุก 30-45 นาที");
+        recs.push("ควรพักสายตาและยืดเหยียดคอ ไหล่ และสะบักทุก 30–45 นาที");
     } else if (score >= 50) {
         recs.push("ควรปรับระดับหน้าจอให้อยู่ใกล้ระดับสายตา และจัดหัวไหล่ให้อยู่ในแนวผ่อนคลาย");
     } else {
-        recs.push("ควรหยุดพักชั่วคราว ปรับเก้าอี้ หน้าจอ และท่านั่งก่อนเริ่มใช้งานต่อ");
+        recs.push("ควรหยุดพัก ปรับเก้าอี้ หน้าจอ และตำแหน่งกล้องก่อนเริ่ม session ใหม่");
     }
 
-    if (forwardAlerts > 0 || forwardPct >= 15) {
-        recs.push("พบค่ามุมคอไม่อยู่ในเกณฑ์ปกติ ควรดึงคางกลับเล็กน้อยและหลีกเลี่ยงการยื่นหน้าเข้าใกล้หน้าจอ");
+    if (forwardAlerts > 0 || forwardPct >= 20) {
+        recs.push("สำหรับคอยื่น: ปรับจอให้อยู่ระดับสายตา ลดการก้มมอง และดึงคางกลับเล็กน้อยเป็นระยะ");
     }
 
-    if (roundedAlerts > 0 || roundedPct >= 15) {
-        recs.push("พบค่ามุมไหล่ไม่อยู่ในเกณฑ์ปกติ ควรดึงหัวไหล่กลับ เปิดอก และผ่อนคลายกล้ามเนื้อไหล่เป็นระยะ");
+    if (roundedAlerts > 0 || roundedPct >= 20) {
+        recs.push("สำหรับไหล่ห่อ: เปิดอก ดึงสะบักเบา ๆ และวางคีย์บอร์ด/เมาส์ให้อยู่ใกล้ตัวมากขึ้น");
     }
 
-    if (alerts >= 5) {
-        recs.push("มีการแจ้งเตือนหลายครั้ง ควรลดระยะเวลานั่งต่อเนื่องและเพิ่มช่วงพักสั้น ๆ");
+    if (alerts > 0) {
+        recs.push("เมื่อมี LINE หรือ browser alert ควรปรับท่าทางทันที ไม่ควรรอจนจบ session");
     }
 
-    if (issuePct >= 40 && alerts === 0) {
-        recs.push("มีช่วงเวลาที่ค่ามุมไม่อยู่ในเกณฑ์ปกติค่อนข้างมาก แต่ยังไม่มีการแจ้งเตือน อาจเกิดจากยังไม่ผิดท่าต่อเนื่องครบเวลาที่กำหนด");
+    if (issuePct >= 50) {
+        recs.push("สัดส่วนท่าทางเสี่ยงสูง ควรลดเวลานั่งต่อเนื่องและเพิ่มช่วงพักสั้น ๆ ระหว่างทำงาน");
     }
 
-    setHTML("recList", recs.slice(0, 3).map((r) => `<li>${r}</li>`).join(""));
+    renderList("recList", recs);
+}
+
+function renderList(id, items) {
+    const list = $(id);
+    if (!list) return;
+
+    list.innerHTML = "";
+
+    items.forEach((text) => {
+        const li = document.createElement("li");
+        li.textContent = text;
+        list.appendChild(li);
+    });
 }
 
 function percent(value, total) {
-    if (!total || total <= 0) return 0;
-    return (Number(value) / Number(total)) * 100;
+    const n = Number(value || 0);
+    const t = Number(total || 0);
+
+    if (t <= 0) return 0;
+
+    return (n / t) * 100;
 }
 
 function clamp(value, min, max) {
@@ -347,7 +384,7 @@ function clamp(value, min, max) {
 }
 
 function formatTime(totalSeconds) {
-    const s = Math.floor(Number(totalSeconds) || 0);
+    const s = Math.max(0, Math.floor(Number(totalSeconds || 0)));
     const h = Math.floor(s / 3600);
     const m = Math.floor((s % 3600) / 60);
     const sec = s % 60;
@@ -359,20 +396,20 @@ function formatTime(totalSeconds) {
     return `${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
 }
 
+function setWidth(id, width) {
+    const el = $(id);
+    if (el) {
+        el.style.width = width;
+    }
+}
+
 function setText(id, value) {
     const el = $(id);
     if (!el) return;
-    el.textContent = value;
-}
 
-function setHTML(id, value) {
-    const el = $(id);
-    if (!el) return;
-    el.innerHTML = value;
-}
+    const text = String(value);
 
-function setWidth(id, value) {
-    const el = $(id);
-    if (!el) return;
-    el.style.width = value;
+    if (el.textContent !== text) {
+        el.textContent = text;
+    }
 }

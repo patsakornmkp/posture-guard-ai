@@ -1,9 +1,10 @@
 # schemas.py
 # Pydantic models สำหรับ request และ response ของทุก API endpoint
 #
-# เวอร์ชันใหม่:
+# เวอร์ชันนี้:
 # - ใช้ CVA สำหรับภาวะคอยื่น
 # - ใช้ FSA สำหรับภาวะไหล่ห่อ
+# - ไม่ใช้ Calibration / Baseline แล้ว
 # - ลบ field ที่เกี่ยวกับหลังคร่อม / kyphosis / hunched back ออก
 # - เพิ่มจำนวนแจ้งเตือนแยกตามสาเหตุ: คอยื่น / ไหล่ห่อ
 # - เพิ่ม timer/alert แยกคอยื่นและไหล่ห่อใน /posture/current
@@ -30,22 +31,6 @@ class RiskLevel(str, Enum):
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
-
-
-# ========================
-# Shared sub-models
-# ========================
-
-class BaselineData(BaseModel):
-    cva_angle: Optional[float] = Field(
-        None,
-        description="CVA angle ตอน calibrate สำหรับประเมินภาวะคอยื่น (องศา)"
-    )
-
-    fsa_angle: Optional[float] = Field(
-        None,
-        description="FSA angle ตอน calibrate สำหรับประเมินภาวะไหล่ห่อ (องศา)"
-    )
 
 
 # ========================
@@ -91,11 +76,6 @@ class PostureResponse(BaseModel):
     message: str = Field(
         ...,
         description="ข้อความอธิบายสถานะ"
-    )
-
-    baseline: Optional[BaselineData] = Field(
-        None,
-        description="ค่า baseline จาก calibration"
     )
 
     # ========================
@@ -147,10 +127,10 @@ class PostureResponse(BaseModel):
 
 class SessionStartRequest(BaseModel):
     planned_duration_minutes: int = Field(
-        30,
-        ge=1,
+        0,
+        ge=0,
         le=480,
-        description="ระยะเวลาที่วางแผนจะนั่ง (นาที)"
+        description="ระยะเวลาที่วางแผนจะนั่ง (นาที), 0 หมายถึง realtime mode / ไม่จำกัดเวลา"
     )
 
 
@@ -167,7 +147,7 @@ class SessionSummaryResponse(BaseModel):
 
     planned_duration_minutes: Optional[int] = Field(
         None,
-        description="ระยะเวลาที่วางแผน (นาที)"
+        description="ระยะเวลาที่วางแผน (นาที), 0 หมายถึง realtime mode"
     )
 
     actual_duration_seconds: float = Field(
@@ -228,27 +208,6 @@ class SessionSummaryResponse(BaseModel):
     risk_level: RiskLevel = Field(
         ...,
         description="ระดับความเสี่ยงของ session นี้"
-    )
-
-
-# ========================
-# POST /calibrate
-# ========================
-
-class CalibrateResponse(BaseModel):
-    success: bool = Field(
-        ...,
-        description="calibration สำเร็จหรือไม่"
-    )
-
-    message: str = Field(
-        ...,
-        description="ข้อความอธิบายผล"
-    )
-
-    baseline: BaselineData = Field(
-        ...,
-        description="ค่า baseline ที่บันทึกได้"
     )
 
 
