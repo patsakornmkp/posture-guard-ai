@@ -82,11 +82,11 @@ CAMERA_FORWARD_DIRECTION: int = 1
 #
 # ไม่มีระดับเฝ้าระวังแล้ว
 
-FORWARD_HEAD_GOOD_THRESHOLD: float = 50.0
+FORWARD_HEAD_GOOD_THRESHOLD: float = 43.0
 
 # เก็บไว้เพื่อรองรับโค้ดเดิม แต่ใช้ค่าเดียวกับ GOOD_THRESHOLD
-FORWARD_HEAD_BAD_THRESHOLD: float = 50.0
-FORWARD_HEAD_SEVERE_THRESHOLD: float = 50.0
+FORWARD_HEAD_BAD_THRESHOLD: float = 43.0
+FORWARD_HEAD_SEVERE_THRESHOLD: float = 43.0
 
 # ========================
 # FSA — Rounded Shoulder Posture / ไหล่ห่อ

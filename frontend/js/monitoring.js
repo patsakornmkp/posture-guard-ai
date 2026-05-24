@@ -1,14 +1,17 @@
 /* =========================================
-   Monitoring Page
+   PostureGuard AI - Monitoring Page
+   Clean Compact Production Version
    File: frontend/js/monitoring.js
 
-   ใช้กับหน้า realtime monitoring ของ PostureGuard AI
-   - ใช้ CVA สำหรับคอยื่น
-   - ใช้ FSA สำหรับไหล่ห่อ
+   - ใช้ CVA ตรวจคอยื่น
+   - ใช้ FSA ตรวจไหล่ห่อ
    - ไม่มี Calibration / Baseline
    - ไม่มี hunched back / kyphosis
-   - มี Settings Panel: เสียง / Browser / LINE
-   - มี Chart Panel: กราฟ CVA / FSA
+   - ไม่มีกราฟในหน้า Monitoring
+   - ไม่มี stats modal / stats button
+   - Summary เป็น popover ข้างปุ่มตั้งค่า
+   - Settings เป็น popover ขนาดจำกัด ไม่ล้นจอ
+   - Browser notification ไม่เด้งบัง UI ตอนผู้ใช้เปิดหน้าเว็บอยู่
 ========================================= */
 
 (function () {
@@ -34,25 +37,22 @@
     let lastElapsedTick = null;
 
     let connectionErrorCount = 0;
-
-    let angleHistory = [];
+    let currentRiskInFrame = false;
 
     const VIDEO_FRAME_INTERVAL = 700;
     const POSTURE_POLL_INTERVAL = 1500;
     const ELAPSED_INTERVAL = 1000;
-    const FRONTEND_ALERT_COOLDOWN = 5000;
+    const FRONTEND_ALERT_COOLDOWN = 45000;
     const CONNECTION_ERROR_VISIBLE_LIMIT = 1;
 
     const CVA_NORMAL_THRESHOLD = 50;
     const FSA_NORMAL_THRESHOLD = 54;
 
-    const MAX_CHART_POINTS = 60;
-
     const $ = (id) => document.getElementById(id);
 
     document.addEventListener("DOMContentLoaded", async () => {
         if (!window.api || !window.utils) {
-            alert("ระบบ frontend โหลดไม่ครบ กรุณาตรวจสอบการเรียกไฟล์ app.js");
+            alert("ระบบ frontend โหลดไม่ครบ กรุณาตรวจสอบว่าโหลด app.js ก่อน monitoring.js");
             window.location.replace("login.html");
             return;
         }
@@ -69,9 +69,9 @@
 
         setupVideoStatus();
         setupStopButton();
-
+        setupSummaryPanel();
         setupSettingsPanel();
-        setupChartPanel();
+        setupSharedPanelEvents();
 
         setupSpeechToggle();
         setupNotificationToggle();
@@ -85,7 +85,10 @@
         videoFrameLoading = false;
         isStopping = false;
 
+        notificationEnabled = false;
+        notificationPermissionAsked = false;
         lastFrontendAlertTime = 0;
+
         lastForwardHeadAlertActive = false;
         lastRoundedShoulderAlertActive = false;
 
@@ -94,7 +97,7 @@
         lastElapsedTick = Date.now();
 
         connectionErrorCount = 0;
-        angleHistory = [];
+        currentRiskInFrame = false;
 
         setText("elapsedTime", formatTime(0));
 
@@ -104,10 +107,12 @@
         setText("roundedShoulderDuration", "00:00");
         setText("alertCount", "0 ครั้ง");
 
-        // เผื่อ HTML เก่ายังมี id เดิม
-        setText("goodTime", formatTime(0));
-        setText("forwardHeadAlertCount", "0 ครั้ง");
-        setText("roundedShoulderAlertCount", "0 ครั้ง");
+        setStatsNote("");
+
+        // รองรับ id เก่าที่อาจยังเหลือใน HTML รุ่นก่อน
+        setText("goodTime", "00:00");
+        setText("cvaTimer", "00:00");
+        setText("fsaTimer", "00:00");
     }
 
     function renderInitialLoadingState() {
@@ -115,7 +120,14 @@
 
         if (cameraStatus) {
             cameraStatus.textContent = "กำลังเชื่อมต่อกล้อง...";
-            cameraStatus.classList.remove("is-active", "is-ready", "is-error");
+            cameraStatus.classList.remove(
+                "is-active",
+                "is-live",
+                "is-ready",
+                "is-error",
+                "is-danger",
+                "is-warning"
+            );
         }
 
         const statusCard = $("statusCard");
@@ -125,8 +137,19 @@
         }
 
         setText("statusBadge", "กำลังเริ่มระบบ");
-        setText("statusMessage", "Loading monitoring session");
-        setText("currentAdvice", "ระบบกำลังวิเคราะห์ท่าทางจากกล้อง");
+        setText("statusMessage", "ระบบกำลังเตรียมข้อมูลจากกล้อง");
+        setText(
+            "currentAdvice",
+            "นั่งให้อยู่ในกรอบกล้องด้านข้าง เพื่อให้ระบบอ่านค่า CVA และ FSA ได้ชัดเจน"
+        );
+
+        setText("cvaValue", "—");
+        setText("fsaValue", "—");
+        setText("cvaHint", "กำลังอ่านค่า");
+        setText("fsaHint", "กำลังอ่านค่า");
+
+        updateIssueStatus("cva", "waiting");
+        updateIssueStatus("fsa", "waiting");
     }
 
     /* =========================
@@ -216,7 +239,7 @@
     }
 
     /* =========================
-       Setup Buttons / Panels
+       Buttons / Panels
     ========================= */
 
     function setupStopButton() {
@@ -227,7 +250,7 @@
         }
 
         stopBtn.disabled = false;
-        stopBtn.textContent = "⏹ หยุดการใช้งาน";
+        stopBtn.textContent = "หยุดการใช้งาน";
 
         stopBtn.addEventListener("click", () => {
             stopSession();
@@ -242,84 +265,159 @@
         }
 
         stopBtn.disabled = isLoading;
-        stopBtn.textContent = isLoading ? "กำลังหยุด..." : "⏹ หยุดการใช้งาน";
+        stopBtn.textContent = isLoading ? "กำลังหยุด..." : "หยุดการใช้งาน";
+    }
+
+    function setupSummaryPanel() {
+        const summaryBtn = $("summaryBtn");
+        const summaryPanel = $("summaryPanel");
+        const summaryCloseBtn = $("summaryCloseBtn");
+
+        if (!summaryBtn || !summaryPanel || !summaryCloseBtn) {
+            return;
+        }
+
+        summaryBtn.setAttribute("aria-expanded", "false");
+
+        summaryBtn.addEventListener("click", () => {
+            const isOpen = !summaryPanel.hidden;
+
+            if (isOpen) {
+                closePanel(summaryPanel, summaryBtn);
+                hideOverlayIfNoPanelOpen();
+                return;
+            }
+
+            closeSettingsPanel();
+            openPanel(summaryPanel, summaryBtn, summaryCloseBtn);
+        });
+
+        summaryCloseBtn.addEventListener("click", () => {
+            closePanel(summaryPanel, summaryBtn, summaryBtn);
+            hideOverlayIfNoPanelOpen();
+        });
     }
 
     function setupSettingsPanel() {
         const settingsBtn = $("settingsBtn");
         const settingsPanel = $("settingsPanel");
-        const settingsOverlay = $("settingsOverlay");
         const settingsCloseBtn = $("settingsCloseBtn");
 
-        if (!settingsBtn || !settingsPanel || !settingsOverlay || !settingsCloseBtn) {
+        if (!settingsBtn || !settingsPanel || !settingsCloseBtn) {
             return;
         }
 
+        settingsBtn.setAttribute("aria-expanded", "false");
+
         settingsBtn.addEventListener("click", () => {
-            openPanel(settingsPanel, settingsOverlay, settingsCloseBtn);
+            const isOpen = !settingsPanel.hidden;
+
+            if (isOpen) {
+                closePanel(settingsPanel, settingsBtn);
+                hideOverlayIfNoPanelOpen();
+                return;
+            }
+
+            closeSummaryPanel();
+            openPanel(settingsPanel, settingsBtn, settingsCloseBtn);
         });
 
         settingsCloseBtn.addEventListener("click", () => {
-            closePanel(settingsPanel, settingsOverlay, settingsBtn);
+            closePanel(settingsPanel, settingsBtn, settingsBtn);
+            hideOverlayIfNoPanelOpen();
         });
+    }
 
-        settingsOverlay.addEventListener("click", () => {
-            closePanel(settingsPanel, settingsOverlay, settingsBtn);
-        });
+    function setupSharedPanelEvents() {
+        const settingsOverlay = $("settingsOverlay");
+
+        if (settingsOverlay) {
+            settingsOverlay.addEventListener("click", () => {
+                closeAllPanels();
+            });
+        }
 
         document.addEventListener("keydown", (event) => {
-            if (event.key === "Escape" && !settingsPanel.hidden) {
-                closePanel(settingsPanel, settingsOverlay, settingsBtn);
+            if (event.key === "Escape") {
+                closeAllPanels();
             }
         });
     }
 
-    function setupChartPanel() {
-        const chartOpenBtn = $("chartOpenBtn");
-        const chartPanel = $("chartPanel");
-        const chartOverlay = $("chartOverlay");
-        const chartCloseBtn = $("chartCloseBtn");
+    function openPanel(panel, triggerButton, focusTarget = null) {
+        const settingsOverlay = $("settingsOverlay");
 
-        if (!chartOpenBtn || !chartPanel || !chartOverlay || !chartCloseBtn) {
+        if (!panel || !triggerButton) {
             return;
         }
 
-        chartOpenBtn.addEventListener("click", () => {
-            drawAngleChart();
-            openPanel(chartPanel, chartOverlay, chartCloseBtn);
-        });
-
-        chartCloseBtn.addEventListener("click", () => {
-            closePanel(chartPanel, chartOverlay, chartOpenBtn);
-        });
-
-        chartOverlay.addEventListener("click", () => {
-            closePanel(chartPanel, chartOverlay, chartOpenBtn);
-        });
-
-        document.addEventListener("keydown", (event) => {
-            if (event.key === "Escape" && !chartPanel.hidden) {
-                closePanel(chartPanel, chartOverlay, chartOpenBtn);
-            }
-        });
-    }
-
-    function openPanel(panel, overlay, focusTarget = null) {
         panel.hidden = false;
-        overlay.hidden = false;
+        triggerButton.setAttribute("aria-expanded", "true");
+
+        if (settingsOverlay) {
+            settingsOverlay.hidden = false;
+        }
 
         if (focusTarget) {
             window.setTimeout(() => focusTarget.focus(), 0);
         }
     }
 
-    function closePanel(panel, overlay, focusTarget = null) {
+    function closePanel(panel, triggerButton, focusTarget = null) {
+        if (!panel || !triggerButton) {
+            return;
+        }
+
         panel.hidden = true;
-        overlay.hidden = true;
+        triggerButton.setAttribute("aria-expanded", "false");
 
         if (focusTarget) {
             window.setTimeout(() => focusTarget.focus(), 0);
         }
+    }
+
+    function closeSummaryPanel() {
+        const summaryPanel = $("summaryPanel");
+        const summaryBtn = $("summaryBtn");
+
+        if (!summaryPanel || !summaryBtn) {
+            return;
+        }
+
+        closePanel(summaryPanel, summaryBtn);
+    }
+
+    function closeSettingsPanel() {
+        const settingsPanel = $("settingsPanel");
+        const settingsBtn = $("settingsBtn");
+
+        if (!settingsPanel || !settingsBtn) {
+            return;
+        }
+
+        closePanel(settingsPanel, settingsBtn);
+    }
+
+    function closeAllPanels() {
+        closeSummaryPanel();
+        closeSettingsPanel();
+        hideOverlayIfNoPanelOpen();
+    }
+
+    function hideOverlayIfNoPanelOpen() {
+        const settingsOverlay = $("settingsOverlay");
+        const summaryPanel = $("summaryPanel");
+        const settingsPanel = $("settingsPanel");
+
+        if (!settingsOverlay) {
+            return;
+        }
+
+        const hasOpenPanel =
+            (summaryPanel && !summaryPanel.hidden) ||
+            (settingsPanel && !settingsPanel.hidden);
+
+        settingsOverlay.hidden = !hasOpenPanel;
     }
 
     /* =========================
@@ -335,20 +433,44 @@
         }
 
         video.addEventListener("load", () => {
-            if (sessionEnded) return;
+            if (sessionEnded) {
+                return;
+            }
 
             cameraStatus.textContent = "กล้องทำงานอยู่";
             cameraStatus.classList.add("is-active");
-            cameraStatus.classList.remove("is-error");
+            cameraStatus.classList.remove("is-error", "is-danger", "is-warning");
         });
 
         video.addEventListener("error", () => {
-            if (sessionEnded) return;
+            if (sessionEnded) {
+                return;
+            }
 
             cameraStatus.textContent = "ไม่สามารถโหลดภาพจากกล้อง";
             cameraStatus.classList.add("is-error");
-            cameraStatus.classList.remove("is-active");
+            cameraStatus.classList.remove("is-active", "is-live", "is-ready");
         });
+    }
+
+    function updateVideoFrame() {
+        const video = $("videoFeed");
+
+        if (!video || videoFrameLoading || sessionEnded) {
+            return;
+        }
+
+        videoFrameLoading = true;
+
+        const done = () => {
+            videoFrameLoading = false;
+            video.removeEventListener("load", done);
+            video.removeEventListener("error", done);
+        };
+
+        video.addEventListener("load", done);
+        video.addEventListener("error", done);
+        video.src = api.videoFrameUrl();
     }
 
     /* =========================
@@ -524,8 +646,7 @@
         setText("notifyDesc", "ยังไม่อนุญาต");
         return false;
     }
-
-    async function setupLineToggle() {
+        async function setupLineToggle() {
         const toggle = $("lineToggleBtn");
         const desc = $("lineDesc");
 
@@ -588,7 +709,6 @@
         const hasSecret = status.has_channel_secret === true;
         const hasUserId = status.has_line_user_id === true;
         const enabled = status.line_enabled === true;
-
         const ready = hasToken && hasSecret && hasUserId;
 
         toggle.checked = enabled;
@@ -616,8 +736,6 @@
             return null;
         }
 
-        // backend ปัจจุบันคืนรูปแบบ { success, line, message }
-        // เผื่อ backend เก่าคืน status ตรง ๆ ก็ยังรองรับได้
         return data.line || data.status || data;
     }
 
@@ -710,26 +828,6 @@
         elapsedInterval = null;
     }
 
-    function updateVideoFrame() {
-        const video = $("videoFeed");
-
-        if (!video || videoFrameLoading || sessionEnded) {
-            return;
-        }
-
-        videoFrameLoading = true;
-
-        const done = () => {
-            videoFrameLoading = false;
-            video.removeEventListener("load", done);
-            video.removeEventListener("error", done);
-        };
-
-        video.addEventListener("load", done);
-        video.addEventListener("error", done);
-        video.src = api.videoFrameUrl();
-    }
-
     async function updatePosture() {
         if (sessionEnded || isStopping) {
             return;
@@ -752,8 +850,6 @@
             const safeSummary = summary || {};
 
             updateElapsedCountingState(safePosture);
-            appendAnglePoint(safePosture);
-
             renderPosture(safePosture);
             renderStats(safeSummary);
             handleAlertEvent(safePosture);
@@ -780,7 +876,6 @@
 
         utils.markMonitoringSessionStopped(summary);
         unlockBrowserBackGuard();
-
         utils.redirectTo("summary.html", { replace: true });
     }
 
@@ -801,7 +896,6 @@
 
     function shouldCountElapsedTime(posture) {
         const status = posture.status || "no_person_detected";
-
         return status === "good" || status === "bad";
     }
 
@@ -862,7 +956,7 @@
         if (cameraStatus) {
             cameraStatus.textContent = "เชื่อมต่อ backend ไม่ได้";
             cameraStatus.classList.add("is-error");
-            cameraStatus.classList.remove("is-active");
+            cameraStatus.classList.remove("is-active", "is-live", "is-ready");
         }
 
         const statusCard = $("statusCard");
@@ -872,43 +966,57 @@
         }
 
         setText("statusBadge", "รอการเชื่อมต่อ");
-        setText("statusMessage", "Backend connection failed");
-        setText("currentAdvice", "ตรวจสอบว่า backend เปิดอยู่");
+        setText("statusMessage", "เชื่อมต่อ backend ไม่ได้");
+        setText("currentAdvice", "ตรวจสอบว่า backend เปิดอยู่ แล้วรีเฟรชหน้านี้อีกครั้ง");
+
+        updateIssueStatus("cva", "waiting");
+        updateIssueStatus("fsa", "waiting");
     }
 
     function renderPosture(posture) {
         const status = posture.status || "no_person_detected";
+        const hasForwardHead = posture.is_forward_head === true;
+        const hasRoundedShoulder = posture.is_rounded_shoulder === true;
+        const hasActiveAlert =
+            posture.forward_head_alert_active === true ||
+            posture.rounded_shoulder_alert_active === true;
+
+        currentRiskInFrame =
+            status === "bad" ||
+            hasForwardHead ||
+            hasRoundedShoulder ||
+            hasActiveAlert;
 
         const statusMap = {
             good: {
                 label: "ปกติ",
                 className: "is-good",
-                message: "ท่าทางอยู่ในเกณฑ์ปกติ",
-                advice: "รักษาท่านั่งให้อยู่ในแนวที่เหมาะสม",
+                message: "CVA และ FSA อยู่ในเกณฑ์ดี",
+                advice: "นั่งได้ดีแล้ว รักษาระดับศีรษะ คอ และหัวไหล่ให้อยู่ในแนวเดิม",
             },
             bad: {
-                label: "ควรปรับท่าทาง",
-                className: "is-bad",
-                message: "ตรวจพบแนวโน้มท่าทางเสี่ยง",
-                advice: "ระบบกำลังจับเวลาต่อเนื่อง",
+                label: hasActiveAlert ? "ควรปรับท่าทาง" : "เริ่มเสี่ยง",
+                className: hasActiveAlert ? "is-danger" : "is-warning",
+                message: buildBadPostureMessage(hasForwardHead, hasRoundedShoulder),
+                advice: "ลองปรับศีรษะและหัวไหล่ให้อยู่ในแนวที่สบายขึ้น",
             },
             paused: {
                 label: "หยุดชั่วคราว",
                 className: "is-waiting",
-                message: "Session paused",
-                advice: "จัดตำแหน่งให้อยู่ในกรอบกล้อง",
+                message: "ระบบยังไม่จับเวลาขณะนี้",
+                advice: "จัดตำแหน่งให้อยู่ในกรอบกล้องด้านข้าง",
             },
             no_person_detected: {
                 label: "ไม่พบผู้ใช้งาน",
                 className: "is-waiting",
-                message: "No person detected",
-                advice: "กรุณานั่งให้อยู่ในกรอบกล้อง",
+                message: "ยังไม่พบผู้ใช้ในกรอบกล้อง",
+                advice: "กรุณานั่งให้อยู่ในกรอบกล้องและให้เห็นด้านข้างชัดเจน",
             },
             marker_not_detected: {
-                label: "ไม่พบข้อมูลท่าทาง",
+                label: "อ่านท่าทางไม่ชัด",
                 className: "is-waiting",
-                message: "Landmark not detected",
-                advice: "ตรวจสอบแสงและตำแหน่งกล้อง",
+                message: "ระบบยังอ่านตำแหน่งคอและไหล่ได้ไม่ครบ",
+                advice: "ปรับแสงหรือขยับกล้องให้เห็นศีรษะ คอ และหัวไหล่ชัดขึ้น",
             },
         };
 
@@ -926,6 +1034,22 @@
         renderIssueValues(posture);
     }
 
+    function buildBadPostureMessage(hasForwardHead, hasRoundedShoulder) {
+        if (hasForwardHead && hasRoundedShoulder) {
+            return "พบแนวโน้มคอยื่นและไหล่ห่อ";
+        }
+
+        if (hasForwardHead) {
+            return "พบแนวโน้มคอยื่น";
+        }
+
+        if (hasRoundedShoulder) {
+            return "พบแนวโน้มไหล่ห่อ";
+        }
+
+        return "พบแนวโน้มท่าทางเสี่ยง";
+    }
+
     function renderIssueValues(posture) {
         const cva = normalizeNumber(posture.cva_angle);
         const fsa = normalizeNumber(posture.fsa_angle);
@@ -936,7 +1060,20 @@
         setText("cvaHint", getCvaHint(posture));
         setText("fsaHint", getFsaHint(posture));
 
-        // เผื่อ HTML เก่ายังมี id เหล่านี้
+        updateIssueStatus("cva", getAngleStatus({
+            value: cva,
+            threshold: CVA_NORMAL_THRESHOLD,
+            isAlertActive: posture.forward_head_alert_active === true,
+            isIssueActive: posture.is_forward_head === true,
+        }));
+
+        updateIssueStatus("fsa", getAngleStatus({
+            value: fsa,
+            threshold: FSA_NORMAL_THRESHOLD,
+            isAlertActive: posture.rounded_shoulder_alert_active === true,
+            isIssueActive: posture.is_rounded_shoulder === true,
+        }));
+
         setText("cvaTimer", formatTime(posture.forward_head_duration || 0));
         setText("fsaTimer", formatTime(posture.rounded_shoulder_duration || 0));
 
@@ -956,9 +1093,6 @@
         const good = Number(summary.good_posture_seconds || 0);
         const forward = Number(summary.forward_head_seconds || 0);
         const rounded = Number(summary.rounded_shoulder_seconds || 0);
-
-        const forwardAlertCount = Number(summary.forward_head_alert_count || 0);
-        const roundedAlertCount = Number(summary.rounded_shoulder_alert_count || 0);
         const alertCount = Number(summary.alert_count || 0);
 
         const goodPct = percent(good, effective);
@@ -970,30 +1104,150 @@
         setText("roundedShoulderDuration", formatTime(rounded));
         setText("alertCount", `${alertCount} ครั้ง`);
 
-        // เผื่อ HTML เก่ายังมี id เดิม
         setText("goodTime", formatTime(good));
-        setText("forwardHeadAlertCount", `${forwardAlertCount} ครั้ง`);
-        setText("roundedShoulderAlertCount", `${roundedAlertCount} ครั้ง`);
+        setStatsNote(buildStatsNote(riskPct));
+    }
+
+    function buildStatsNote(riskPct) {
+        if (currentRiskInFrame && riskPct < 1) {
+            return "พบความเสี่ยงแล้ว หากค้างต่อเนื่องระบบจะเริ่มนับสะสม";
+        }
+
+        if (currentRiskInFrame) {
+            return "กำลังนับช่วงท่าทางเสี่ยง";
+        }
+
+        return "";
+    }
+
+    function setStatsNote(message) {
+        const note = $("statsNote");
+
+        if (!note) {
+            return;
+        }
+
+        const text = String(message || "").trim();
+
+        if (!text) {
+            note.hidden = true;
+            note.textContent = "";
+            return;
+        }
+
+        note.hidden = false;
+        note.textContent = text;
     }
 
     function buildCurrentAdvice(posture, fallback) {
-        const issues = [];
+        const cva = normalizeNumber(posture.cva_angle);
+        const fsa = normalizeNumber(posture.fsa_angle);
 
-        if (posture.is_forward_head === true) {
-            const duration = Number(posture.forward_head_duration || 0);
-            issues.push(`คอยื่น ${formatTime(duration)}`);
+        const hasForwardHead =
+            posture.is_forward_head === true ||
+            (Number.isFinite(cva) && cva < CVA_NORMAL_THRESHOLD);
+
+        const hasRoundedShoulder =
+            posture.is_rounded_shoulder === true ||
+            (Number.isFinite(fsa) && fsa < FSA_NORMAL_THRESHOLD);
+
+        if (hasForwardHead && hasRoundedShoulder) {
+            return "ดึงคางกลับเล็กน้อย เปิดอก และผ่อนหัวไหล่ลง";
         }
 
-        if (posture.is_rounded_shoulder === true) {
-            const duration = Number(posture.rounded_shoulder_duration || 0);
-            issues.push(`ไหล่ห่อ ${formatTime(duration)}`);
+        if (hasForwardHead) {
+            return "ดึงคางกลับเล็กน้อย ให้หูอยู่ใกล้แนวหัวไหล่มากขึ้น";
         }
 
-        if (issues.length > 0) {
-            return issues.join(" · ");
+        if (hasRoundedShoulder) {
+            return "ผ่อนหัวไหล่ลง เปิดอกเล็กน้อย และวางแขนให้สบาย";
         }
 
-        return fallback || "ระบบกำลังวิเคราะห์ท่าทาง";
+        return fallback || "รักษาระดับศีรษะ คอ และหัวไหล่ให้อยู่ในแนวเดิม";
+    }
+
+    function getAngleStatus({ value, threshold, isAlertActive, isIssueActive }) {
+        if (!Number.isFinite(value)) {
+            return "waiting";
+        }
+
+        if (value >= threshold) {
+            return "good";
+        }
+
+        if (isAlertActive) {
+            return "danger";
+        }
+
+        if (isIssueActive) {
+            return "warning";
+        }
+
+        return "warning";
+    }
+
+    function updateIssueStatus(type, status) {
+        const config = {
+            good: {
+                label: "ปกติ",
+                cardClass: "is-good",
+                pillClass: "is-good",
+            },
+            warning: {
+                label: "เริ่มเสี่ยง",
+                cardClass: "is-warning",
+                pillClass: "is-warning",
+            },
+            danger: {
+                label: "ควรปรับ",
+                cardClass: "is-danger",
+                pillClass: "is-danger",
+            },
+            waiting: {
+                label: "รอข้อมูล",
+                cardClass: "",
+                pillClass: "",
+            },
+        };
+
+        const item = config[status] || config.waiting;
+        const card = type === "cva" ? $("cvaMetricCard") : $("fsaMetricCard");
+        const pill = type === "cva" ? $("cvaStatusPill") : $("fsaStatusPill");
+
+        if (card) {
+            card.classList.remove(
+                "is-good",
+                "is-normal",
+                "is-warning",
+                "is-danger",
+                "good",
+                "normal",
+                "warning",
+                "danger"
+            );
+
+            if (item.cardClass) {
+                card.classList.add(item.cardClass);
+            }
+        }
+
+        if (pill) {
+            pill.textContent = item.label;
+            pill.classList.remove(
+                "is-good",
+                "is-normal",
+                "is-warning",
+                "is-danger",
+                "good",
+                "normal",
+                "warning",
+                "danger"
+            );
+
+            if (item.pillClass) {
+                pill.classList.add(item.pillClass);
+            }
+        }
     }
 
     /* =========================
@@ -1050,7 +1304,9 @@
         const roundedShoulderAlertActive = posture.rounded_shoulder_alert_active === true;
 
         const directAlert =
-            posture.alert === true || forwardHeadAlert || roundedShoulderAlert;
+            posture.alert === true ||
+            forwardHeadAlert ||
+            roundedShoulderAlert;
 
         const becameForwardHeadActive =
             forwardHeadAlertActive && !lastForwardHeadAlertActive;
@@ -1062,7 +1318,9 @@
         lastRoundedShoulderAlertActive = roundedShoulderAlertActive;
 
         const shouldNotify =
-            directAlert || becameForwardHeadActive || becameRoundedShoulderActive;
+            directAlert ||
+            becameForwardHeadActive ||
+            becameRoundedShoulderActive;
 
         if (!shouldNotify) {
             return;
@@ -1083,10 +1341,26 @@
         }
     }
 
+    function shouldShowBrowserNotification() {
+        return document.hidden || !document.hasFocus();
+    }
+
     function showBrowserNotification(message) {
-        if (!notificationEnabled) return;
-        if (!("Notification" in window)) return;
-        if (Notification.permission !== "granted") return;
+        if (!notificationEnabled) {
+            return;
+        }
+
+        if (!shouldShowBrowserNotification()) {
+            return;
+        }
+
+        if (!("Notification" in window)) {
+            return;
+        }
+
+        if (Notification.permission !== "granted") {
+            return;
+        }
 
         try {
             new Notification("PostureGuard AI", {
@@ -1123,177 +1397,6 @@
     }
 
     /* =========================
-       Chart
-    ========================= */
-
-    function appendAnglePoint(posture) {
-        const cva = normalizeNumber(posture.cva_angle);
-        const fsa = normalizeNumber(posture.fsa_angle);
-
-        if (!Number.isFinite(cva) && !Number.isFinite(fsa)) {
-            return;
-        }
-
-        angleHistory.push({
-            t: displayedElapsedSeconds,
-            cva: Number.isFinite(cva) ? cva : null,
-            fsa: Number.isFinite(fsa) ? fsa : null,
-        });
-
-        if (angleHistory.length > MAX_CHART_POINTS) {
-            angleHistory.shift();
-        }
-    }
-
-    function drawAngleChart() {
-        const svg = $("angleChartSvg");
-
-        if (!svg) {
-            return;
-        }
-
-        svg.innerHTML = "";
-
-        if (angleHistory.length < 2) {
-            svg.innerHTML = `
-                <text x="380" y="165" text-anchor="middle" class="chart-empty-text">
-                    ยังไม่มีข้อมูลเพียงพอสำหรับแสดงกราฟ
-                </text>
-            `;
-            return;
-        }
-
-        const width = 760;
-        const height = 330;
-
-        const padding = {
-            left: 54,
-            right: 36,
-            top: 42,
-            bottom: 46,
-        };
-
-        const chartWidth = width - padding.left - padding.right;
-        const chartHeight = height - padding.top - padding.bottom;
-
-        const minAngle = 15;
-        const maxAngle = 70;
-
-        const firstTime = angleHistory[0].t || 0;
-        const lastTime = angleHistory[angleHistory.length - 1].t || 1;
-        const timeSpan = Math.max(lastTime - firstTime, 1);
-
-        const getX = (t) => {
-            return padding.left + ((t - firstTime) / timeSpan) * chartWidth;
-        };
-
-        const getY = (angle) => {
-            const clamped = clamp(angle, minAngle, maxAngle);
-            return padding.top + chartHeight - ((clamped - minAngle) / (maxAngle - minAngle)) * chartHeight;
-        };
-
-        const gridValues = [20, 30, 40, 50, 60];
-
-        let content = "";
-
-        gridValues.forEach((value) => {
-            const y = getY(value);
-
-            content += `
-                <line x1="${padding.left}" y1="${y}" x2="${width - padding.right}" y2="${y}"
-                    stroke="rgba(0,0,0,0.08)" stroke-width="1" />
-                <text x="14" y="${y + 4}" font-size="12" fill="#8a9390">${value}°</text>
-            `;
-        });
-
-        const cvaThresholdY = getY(CVA_NORMAL_THRESHOLD);
-        const fsaThresholdY = getY(FSA_NORMAL_THRESHOLD);
-
-        content += `
-            <line x1="${padding.left}" y1="${cvaThresholdY}" x2="${width - padding.right}" y2="${cvaThresholdY}"
-                stroke="#d49a16" stroke-width="2" stroke-dasharray="8 8" opacity="0.6" />
-            <line x1="${padding.left}" y1="${fsaThresholdY}" x2="${width - padding.right}" y2="${fsaThresholdY}"
-                stroke="#1d9e75" stroke-width="2" stroke-dasharray="8 8" opacity="0.55" />
-        `;
-
-        const cvaPath = buildLinePath(angleHistory, "cva", getX, getY);
-        const fsaPath = buildLinePath(angleHistory, "fsa", getX, getY);
-
-        if (cvaPath) {
-            content += `
-                <path d="${cvaPath}" fill="none" stroke="#d49a16"
-                    stroke-width="4" stroke-linecap="round" stroke-linejoin="round" />
-            `;
-        }
-
-        if (fsaPath) {
-            content += `
-                <path d="${fsaPath}" fill="none" stroke="#1d9e75"
-                    stroke-width="4" stroke-linecap="round" stroke-linejoin="round" />
-            `;
-        }
-
-        angleHistory.forEach((point) => {
-            const x = getX(point.t);
-
-            if (point.cva !== null) {
-                content += `<circle cx="${x}" cy="${getY(point.cva)}" r="4" fill="#d49a16" />`;
-            }
-
-            if (point.fsa !== null) {
-                content += `<circle cx="${x}" cy="${getY(point.fsa)}" r="4" fill="#1d9e75" />`;
-            }
-        });
-
-        content += buildTimeLabels({
-            width,
-            height,
-            padding,
-            firstTime,
-            lastTime,
-            getX,
-        });
-
-        svg.innerHTML = content;
-    }
-
-    function buildLinePath(points, key, getX, getY) {
-        const valid = points.filter((p) => p[key] !== null && Number.isFinite(p[key]));
-
-        if (valid.length < 2) {
-            return "";
-        }
-
-        return valid
-            .map((p, index) => {
-                const x = getX(p.t);
-                const y = getY(p[key]);
-
-                return `${index === 0 ? "M" : "L"} ${x} ${y}`;
-            })
-            .join(" ");
-    }
-
-    function buildTimeLabels({ height, padding, firstTime, lastTime, getX }) {
-        const labels = [];
-        const total = Math.max(lastTime - firstTime, 1);
-
-        for (let i = 0; i <= 3; i++) {
-            const t = firstTime + (total * i) / 3;
-            const x = getX(t);
-
-            labels.push(`
-                <text x="${x}" y="${height - 14}" text-anchor="middle"
-                    font-size="12" fill="#8a9390">
-                    ${formatTime(t)}
-                </text>
-            `);
-        }
-
-        return labels.join("");
-    }
-
-    /* =========================
        Stop Session
     ========================= */
 
@@ -1310,8 +1413,8 @@
         setStopButtonLoading(true);
 
         setText("statusBadge", "กำลังสรุปผล");
-        setText("statusMessage", "Stopping monitoring session");
-        setText("currentAdvice", "ระบบกำลังบันทึกและสรุปผล");
+        setText("statusMessage", "ระบบกำลังหยุด session และบันทึกผล");
+        setText("currentAdvice", "ระบบกำลังบันทึกและสรุปผลการใช้งาน");
 
         try {
             if (window.alertSpeech && typeof window.alertSpeech.disable === "function") {
@@ -1328,7 +1431,6 @@
 
             utils.markMonitoringSessionStopped(summary);
             unlockBrowserBackGuard();
-
             utils.redirectTo("summary.html", { replace: true });
         } catch (err) {
             console.warn("Stop session error:", err);
@@ -1371,8 +1473,8 @@
 
             utils.markMonitoringSessionStopped(summary);
             unlockBrowserBackGuard();
-
             utils.redirectTo("summary.html", { replace: true });
+
             return true;
         } catch (summaryErr) {
             console.warn("Cannot recover stop session error:", summaryErr);
@@ -1398,7 +1500,7 @@
 
         showToast.timer = setTimeout(() => {
             toast.hidden = true;
-        }, 1600);
+        }, 1800);
     }
 
     /* =========================
@@ -1411,7 +1513,6 @@
         }
 
         const n = Number(value);
-
         return Number.isFinite(n) ? n : NaN;
     }
 
@@ -1447,10 +1548,6 @@
         }
 
         return (n / t) * 100;
-    }
-
-    function clamp(value, min, max) {
-        return Math.max(min, Math.min(max, value));
     }
 
     function setText(id, value) {
