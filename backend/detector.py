@@ -1,34 +1,36 @@
-# backend/detector.py
+# detector.py
 # ใช้ MediaPipe Pose ตรวจจับ landmark และคำนวณมุม CVA + FSA
 #
-# เวอร์ชันนี้:
-# - ล็อกใช้กล้องด้านขวาของผู้ใช้เท่านั้น
-# - ใช้ RIGHT_EAR / RIGHT_SHOULDER เป็นตำแหน่งคาดเดาเริ่มต้น
-# - ใช้ marker สีเหลือง 2 จุด:
-#   1) marker หู / tragus
-#   2) marker ไหล่ / shoulder
-# - แยก ROI หู และ ROI ไหล่ เพื่อไม่ให้ไปจับตู้หรือฉากหลัง
-# - เพิ่ม marker smoothing / sticky tracking ลดอาการจุดดิ้น
-# - ถ้า marker หายชั่วคราว จะ hold ตำแหน่งล่าสุดไว้ก่อน
-# - C7 คำนวณจากจุดไหล่หลังเลือก marker แล้ว
-# - ไม่มี Calibration / Baseline
-# - ไม่มี hunched back / kyphosis
-
-from __future__ import annotations
+# เวอร์ชันใหม่:
+# - CVA ใช้ประเมินภาวะคอยื่น
+# - FSA ใช้ประเมินภาวะไหล่ห่อ
+# - ไม่ใช้ hip landmark เป็นเงื่อนไขหลัก
+# - ไม่ตรวจหลังคร่อม / hunched back แล้ว
+# - รองรับ marker สีเขียวเป็นจุดหลักสำหรับ Tragus, C7, Shoulder
+# - ถ้า marker ไม่ครบ จะ fallback กลับไปใช้ MediaPipe + estimated C7
+# - วาด overlay ให้เห็นเส้นอ้างอิง:
+#   CVA = เส้นแนวนอนผ่าน C7 + เส้น C7 -> Tragus
+#   FSA = เส้นแนวนอนผ่านหัวไหล่ + เส้น Shoulder -> C7
+# - เส้นแนวนอนอ้างอิงทั้ง 2 เส้นเป็นสีเหลือง เส้นบาง
+# - ไม่แสดงตัวเลขมุมบนภาพ เพื่อลดความรกของหน้าจอ
 
 import math
-from dataclasses import dataclass
 from typing import Optional
+from dataclasses import dataclass
 
 import cv2
-import mediapipe as mp
 import numpy as np
+import mediapipe as mp
 
 try:
     from . import config
 except ImportError:
     import config
 
+
+# ========================
+# Data classes
+# ========================
 
 @dataclass
 class Point:
@@ -47,10 +49,14 @@ class DetectionResult:
     annotated_frame: Optional[np.ndarray] = None
 
 
+# ========================
+# Pose Detector
+# ========================
+
 class PoseDetector:
     """MediaPipe Pose Detector สำหรับ PostureGuard"""
 
-    NOSE = 0
+    # MediaPipe Pose landmark index
     LEFT_EAR = 7
     RIGHT_EAR = 8
     LEFT_SHOULDER = 11
@@ -68,29 +74,24 @@ class PoseDetector:
             min_tracking_confidence=config.MP_MIN_TRACKING_CONFIDENCE,
         )
 
+        # เก็บจุดที่ smooth แล้ว
         self._smoothed_points: dict[str, Point] = {}
 
-        self._last_ear_source: str = "MEDIAPIPE"
-        self._last_shoulder_source: str = "MEDIAPIPE"
+        # เก็บ side ล่าสุด เพื่อกัน smoothing ซ้าย/ขวาปนกัน
+        self._last_side: Optional[str] = None
 
-        self._smoothed_ear_marker: Optional[Point] = None
-        self._smoothed_shoulder_marker: Optional[Point] = None
-        self._ear_marker_missing_frames: int = 0
-        self._shoulder_marker_missing_frames: int = 0
+        # เก็บ marker assignment ล่าสุด (ear/c7/shoulder ที่ confirmed แล้ว)
+        # ใช้เป็น anchor เพิ่มเติมเวลาให้คะแนน เพื่อกัน C7/Humerus สลับเฟรมต่อเฟรม
+        self._last_marker_assignment: Optional[dict[str, Point]] = None
 
     def close(self) -> None:
         """ปิด MediaPipe resources"""
         self.pose.close()
 
     def process(self, frame: np.ndarray) -> DetectionResult:
-        """ประมวลผล 1 frame แล้วคืน DetectionResult"""
-
-        if frame is None:
-            return DetectionResult(
-                person_detected=False,
-                annotated_frame=None,
-            )
-
+        """
+        ประมวลผล 1 frame แล้วคืน DetectionResult
+        """
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         rgb_frame.flags.writeable = False
         results = self.pose.process(rgb_frame)
@@ -100,30 +101,24 @@ class PoseDetector:
 
         if not results.pose_landmarks:
             self._smoothed_points.clear()
-            self._smoothed_ear_marker = None
-            self._smoothed_shoulder_marker = None
-            self._ear_marker_missing_frames = 0
-            self._shoulder_marker_missing_frames = 0
-            self._last_ear_source = "NO_POSE"
-            self._last_shoulder_source = "NO_POSE"
+            self._last_side = None
+            self._last_marker_assignment = None
 
             return DetectionResult(
                 person_detected=False,
                 annotated_frame=annotated,
             )
 
-        height, width = frame.shape[:2]
+        h, w = frame.shape[:2]
         landmarks = results.pose_landmarks.landmark
 
-        points = self._extract_points(landmarks, width, height)
+        points = self._extract_points(landmarks, w, h)
+        side = self._pick_visible_side_set(points)
 
-        if not self._is_right_side_usable(points):
-            self._draw_debug_status(
-                frame=annotated,
-                text="RIGHT SIDE NOT READY",
-                y=30,
-                color=(0, 0, 255),
-            )
+        if side is None:
+            self._smoothed_points.clear()
+            self._last_side = None
+            self._last_marker_assignment = None
 
             return DetectionResult(
                 person_detected=True,
@@ -132,14 +127,14 @@ class PoseDetector:
                 annotated_frame=annotated,
             )
 
-        side_points = self._get_right_side_points(points)
-        side_points = self._smooth_points(side_points)
+        side_points = self._get_side_points(points, side)
+        side_points = self._smooth_side_points(side_points, side)
 
         reference_points = self._build_reference_points(
             frame=frame,
             side_points=side_points,
-            width=width,
-            height=height,
+            width=w,
+            height=h,
         )
 
         cva = self._calculate_cva(
@@ -159,20 +154,16 @@ class PoseDetector:
             fsa_angle=fsa,
         )
 
-        if getattr(config, "DEBUG_DRAW_VALUES", False):
-            self._draw_debug_info(
-                frame=annotated,
-                cva_angle=cva,
-                fsa_angle=fsa,
-                shoulder=reference_points["shoulder"],
-            )
-
         return DetectionResult(
             person_detected=True,
             cva_angle=cva,
             fsa_angle=fsa,
             annotated_frame=annotated,
         )
+
+    # ========================
+    # Extract landmarks
+    # ========================
 
     def _extract_points(self, landmarks, width: int, height: int) -> dict[str, Point]:
         """แปลง MediaPipe landmark normalized 0-1 เป็น pixel coordinate"""
@@ -185,66 +176,118 @@ class PoseDetector:
             )
 
         return {
-            "nose": to_point(landmarks[self.NOSE]),
             "left_ear": to_point(landmarks[self.LEFT_EAR]),
             "right_ear": to_point(landmarks[self.RIGHT_EAR]),
             "left_shoulder": to_point(landmarks[self.LEFT_SHOULDER]),
             "right_shoulder": to_point(landmarks[self.RIGHT_SHOULDER]),
         }
 
-    def _is_right_side_usable(self, points: dict[str, Point]) -> bool:
+    # ========================
+    # Side selection
+    # ========================
+
+    def _pick_visible_side_set(self, p: dict[str, Point]) -> Optional[str]:
         """
-        ตรวจว่าฝั่งขวาพอใช้งานได้หรือไม่
+        เลือกฝั่งที่เห็นชัดกว่าแบบเป็นชุดเดียวกัน
 
-        หูและไหล่มี marker สีเหลืองช่วยได้
-        จึงไม่บังคับ visibility สูงเกินไป
+        ใช้เฉพาะ:
+        - ear
+        - shoulder
+
+        ไม่ใช้ hip เพราะระบบตรวจเฉพาะครึ่งตัวบน
         """
 
-        right_ear = points["right_ear"]
-        right_shoulder = points["right_shoulder"]
+        left_points = [
+            p["left_ear"],
+            p["left_shoulder"],
+        ]
 
-        shoulder_min_visibility = min(
-            float(getattr(config, "MIN_VISIBILITY", 0.35)),
-            0.25,
-        )
+        right_points = [
+            p["right_ear"],
+            p["right_shoulder"],
+        ]
 
-        ear_min_visibility = 0.10
+        left_score = self._side_visibility_score(left_points)
+        right_score = self._side_visibility_score(right_points)
 
-        if right_shoulder.visibility < shoulder_min_visibility:
-            return False
+        best_side = "left" if left_score >= right_score else "right"
+        selected = left_points if best_side == "left" else right_points
+        best_score = max(left_score, right_score)
 
-        if right_ear.visibility < ear_min_visibility:
-            return False
+        if best_score < config.MIN_VISIBILITY:
+            return None
 
-        return True
+        ear, shoulder = selected
 
-    def _get_right_side_points(self, points: dict[str, Point]) -> dict[str, Point]:
-        """ล็อกใช้ landmark ฝั่งขวาเท่านั้น"""
+        min_visibility = config.MIN_VISIBILITY
+        ear_min_visibility = max(0.45, min_visibility - 0.1)
+
+        if shoulder.visibility < min_visibility:
+            return None
+
+        if ear.visibility < ear_min_visibility:
+            return None
+
+        return best_side
+
+    def _side_visibility_score(self, points: list[Point]) -> float:
+        return sum(point.visibility for point in points) / len(points)
+
+    def _get_side_points(self, p: dict[str, Point], side: str) -> dict[str, Point]:
+        """
+        ดึงจุดของฝั่งที่เลือก
+
+        มี opposite_shoulder ไว้ช่วยประมาณตำแหน่ง C7
+        เพราะ MediaPipe ไม่มี landmark C7 โดยตรง
+        """
+
+        if side == "left":
+            return {
+                "ear": p["left_ear"],
+                "shoulder": p["left_shoulder"],
+                "opposite_shoulder": p["right_shoulder"],
+            }
 
         return {
-            "nose": points["nose"],
-            "ear": points["right_ear"],
-            "shoulder": points["right_shoulder"],
-            "opposite_shoulder": points["left_shoulder"],
+            "ear": p["right_ear"],
+            "shoulder": p["right_shoulder"],
+            "opposite_shoulder": p["left_shoulder"],
         }
 
-    def _smooth_points(self, points: dict[str, Point]) -> dict[str, Point]:
-        """ทำ EMA smoothing เพื่อลดจุด MediaPipe กระตุก"""
+    # ========================
+    # Smoothing
+    # ========================
 
-        alpha = float(getattr(config, "LANDMARK_SMOOTHING_ALPHA", 0.25))
+    def _smooth_side_points(
+        self,
+        points: dict[str, Point],
+        side: str,
+    ) -> dict[str, Point]:
+        """
+        ทำ EMA smoothing เพื่อลดจุดกระตุก
+        และป้องกันไม่ให้จุดฝั่งซ้าย/ขวาถูก smooth ปนกัน
+        """
+
+        alpha = getattr(config, "LANDMARK_SMOOTHING_ALPHA", 0.45)
+
+        if self._last_side is not None and self._last_side != side:
+            self._smoothed_points.clear()
+
+        self._last_side = side
 
         smoothed: dict[str, Point] = {}
 
         for key, current in points.items():
-            smooth_key = f"right_{key}"
+            smooth_key = f"{side}_{key}"
+
             prev = self._smoothed_points.get(smooth_key)
 
             if prev is None:
                 smoothed_point = current
             else:
                 smoothed_point = Point(
-                    x=(alpha * current.x) + ((1.0 - alpha) * prev.x),
-                    y=(alpha * current.y) + ((1.0 - alpha) * prev.y),
+                    x=(alpha * current.x) + ((1 - alpha) * prev.x),
+                    y=(alpha * current.y) + ((1 - alpha) * prev.y),
                     visibility=current.visibility,
                 )
 
@@ -252,6 +295,10 @@ class PoseDetector:
             smoothed[key] = smoothed_point
 
         return smoothed
+
+    # ========================
+    # Reference points
+    # ========================
 
     def _build_reference_points(
         self,
@@ -261,17 +308,18 @@ class PoseDetector:
         height: int,
     ) -> dict[str, Point]:
         """
-        สร้างจุดอ้างอิงสำหรับคำนวณ CVA/FSA
+        สร้างจุดอ้างอิงที่ใช้คำนวณ CVA/FSA
 
-        - หูใช้ marker สีเหลืองใน head ROI + smoothing
-        - ไหล่ใช้ marker สีเหลืองใน shoulder ROI + smoothing
-        - ถ้า marker หายชั่วคราว จะ hold ตำแหน่งล่าสุดไว้ก่อน
-        - ถ้าหา marker ไม่เจอนานเกินไป fallback ไป MediaPipe
+        ถ้าเปิด green marker และเจอ marker อย่างน้อย 3 จุด:
+        - จุดบนสุด = tragus / ear
+        - จุดกลาง = C7
+        - จุดล่างสุด = shoulder
+
+        ถ้า marker ไม่ครบ:
+        - fallback ไปใช้ MediaPipe ear/shoulder + estimated C7
         """
 
-        self._last_ear_source = "MEDIAPIPE"
-        self._last_shoulder_source = "MEDIAPIPE"
-
+        # fallback เริ่มต้นจาก MediaPipe
         ear = self._estimate_tragus_from_ear(
             ear=side_points["ear"],
             width=width,
@@ -279,47 +327,66 @@ class PoseDetector:
 
         shoulder = side_points["shoulder"]
 
-        raw_ear_marker = self._detect_yellow_tragus_marker(
-            frame=frame,
-            side_points=side_points,
-            expected_ear=ear,
-            width=width,
-            height=height,
-        )
-
-        ear_marker = self._smooth_marker_point(
-            raw_marker=raw_ear_marker,
-            previous_marker_attr="_smoothed_ear_marker",
-            missing_counter_attr="_ear_marker_missing_frames",
-        )
-
-        if ear_marker is not None:
-            ear = ear_marker
-            self._last_ear_source = "MARKER"
-
-        raw_shoulder_marker = self._detect_yellow_shoulder_marker(
-            frame=frame,
-            expected_shoulder=shoulder,
-            expected_ear=ear,
-            width=width,
-            height=height,
-        )
-
-        shoulder_marker = self._smooth_marker_point(
-            raw_marker=raw_shoulder_marker,
-            previous_marker_attr="_smoothed_shoulder_marker",
-            missing_counter_attr="_shoulder_marker_missing_frames",
-        )
-
-        if shoulder_marker is not None:
-            shoulder = shoulder_marker
-            self._last_shoulder_source = "MARKER"
-
         c7 = self._estimate_c7(
-            shoulder=shoulder,
+            side_points=side_points,
             width=width,
             height=height,
         )
+
+        markers = self._detect_green_markers(frame)
+
+        marker_refs = self._assign_green_markers_by_vertical_order(
+            markers=markers,
+            side_points=side_points,
+            width=width,
+            height=height,
+        )
+
+        if marker_refs is not None:
+            return marker_refs
+
+        # ถ้า marker ไม่ครบ ใช้ fallback แบบเดิม แต่พยายาม snap เฉพาะจุดที่ใกล้จริง
+        if not markers:
+            return {
+                "ear": ear,
+                "shoulder": shoulder,
+                "c7": c7,
+            }
+
+        used_indices: set[int] = set()
+
+        marker_ear = self._nearest_marker(
+            markers=markers,
+            target=ear,
+            used_indices=used_indices,
+            max_distance=max(width, height) * 0.16,
+        )
+
+        if marker_ear is not None:
+            ear, marker_index = marker_ear
+            used_indices.add(marker_index)
+
+        marker_shoulder = self._nearest_marker(
+            markers=markers,
+            target=shoulder,
+            used_indices=used_indices,
+            max_distance=max(width, height) * 0.18,
+        )
+
+        if marker_shoulder is not None:
+            shoulder, marker_index = marker_shoulder
+            used_indices.add(marker_index)
+
+        marker_c7 = self._nearest_marker(
+            markers=markers,
+            target=c7,
+            used_indices=used_indices,
+            max_distance=max(width, height) * 0.20,
+        )
+
+        if marker_c7 is not None:
+            c7, marker_index = marker_c7
+            used_indices.add(marker_index)
 
         return {
             "ear": ear,
@@ -327,60 +394,299 @@ class PoseDetector:
             "c7": c7,
         }
 
-    def _smooth_marker_point(
+    def _assign_green_markers_by_vertical_order(
         self,
-        raw_marker: Optional[Point],
-        previous_marker_attr: str,
-        missing_counter_attr: str,
-    ) -> Optional[Point]:
+        markers: list[Point],
+        side_points: dict[str, Point],
+        width: int,
+        height: int,
+    ) -> Optional[dict[str, Point]]:
         """
-        ทำให้ marker นิ่งขึ้น
+        ใช้ marker สีเขียวเป็นจุดหลัก เมื่อเจอ marker อย่างน้อย 3 จุด
 
-        - ถ้าเจอ marker ใหม่ ใช้ EMA smoothing
-        - ถ้า marker หายชั่วคราว ใช้ตำแหน่งล่าสุดต่ออีกไม่กี่ frame
-        - ถ้าหายเกิน MARKER_HOLD_FRAMES จะ fallback เป็น None
+        วิธีใหม่ใช้ anatomical scoring แทนการเรียงตามแกน Y อย่างเดียว
+        เพื่อแก้ปัญหา C7 / Humerus สลับกัน เพราะ:
+        - Tragus จับแม่นเพราะอยู่บนสุดเสมอ
+        - C7 (โคนคอ) กับ Humerus (หัวไหล่) มี Y ใกล้กันมาก
+        - ถ้าเรียง Y อย่างเดียว พอผู้ใช้คอยื่น/ไหล่ห่อ ตำแหน่งจะสลับกันได้
+
+        แนวคิดใหม่:
+        1. ใช้ MediaPipe เป็นจุดอ้างอิงคร่าว ๆ ของ tragus / C7 / shoulder
+        2. ลองทุก permutation (3 marker หา 3 ตำแหน่ง = 6 แบบ)
+        3. ให้คะแนนแต่ละแบบจาก:
+           - ระยะห่างจากจุดอ้างอิง MediaPipe
+           - anatomical constraint (ลำดับแกน Y, ตำแหน่ง X ของ C7)
+        4. เลือก permutation ที่ได้คะแนนรวมดีที่สุด
+
+        เหมาะกับการติด marker 3 จุด:
+        1. tragus / หน้ารูหู
+        2. C7 / โคนคอด้านหลัง
+        3. shoulder / Humerus (หัวไหล่)
         """
 
-        alpha = float(getattr(config, "MARKER_SMOOTHING_ALPHA", 0.18))
-        hold_frames = int(getattr(config, "MARKER_HOLD_FRAMES", 8))
-
-        previous_marker = getattr(self, previous_marker_attr, None)
-        missing_frames = getattr(self, missing_counter_attr, 0)
-
-        if raw_marker is None:
-            missing_frames += 1
-            setattr(self, missing_counter_attr, missing_frames)
-
-            if previous_marker is not None and missing_frames <= hold_frames:
-                return previous_marker
-
-            setattr(self, previous_marker_attr, None)
+        if len(markers) < 3:
             return None
 
-        setattr(self, missing_counter_attr, 0)
+        candidates = self._filter_body_markers(
+            markers=markers,
+            side_points=side_points,
+            width=width,
+            height=height,
+        )
 
-        if previous_marker is None:
-            smoothed = raw_marker
-        else:
-            smoothed = Point(
-                x=(alpha * raw_marker.x) + ((1.0 - alpha) * previous_marker.x),
-                y=(alpha * raw_marker.y) + ((1.0 - alpha) * previous_marker.y),
-                visibility=1.0,
+        if len(candidates) < 3:
+            candidates = markers
+
+        # ถ้าเจอเกิน 6 จุด ตัดเหลือ 6 จุดที่ใกล้ร่างกายสุด เพื่อไม่ให้ permutation บานเกินไป
+        if len(candidates) > 6:
+            ref_ear = side_points["ear"]
+            ref_shoulder = side_points["shoulder"]
+            ref_c7 = self._estimate_c7(
+                side_points=side_points,
+                width=width,
+                height=height,
             )
 
-        setattr(self, previous_marker_attr, smoothed)
+            def min_dist_to_anatomy(point: Point) -> float:
+                return min(
+                    self._distance(point, ref_ear),
+                    self._distance(point, ref_c7),
+                    self._distance(point, ref_shoulder),
+                )
 
-        return smoothed
+            candidates = sorted(candidates, key=min_dist_to_anatomy)[:6]
+
+        # หา assignment ที่ดีที่สุด
+        return self._best_marker_assignment(
+            candidates=candidates,
+            side_points=side_points,
+            width=width,
+            height=height,
+        )
+
+    def _best_marker_assignment(
+        self,
+        candidates: list[Point],
+        side_points: dict[str, Point],
+        width: int,
+        height: int,
+    ) -> Optional[dict[str, Point]]:
+        """
+        ลองทุก triplet ของ marker มาเป็น (tragus, c7, shoulder)
+        แล้วเลือกชุดที่ได้คะแนนดีที่สุด
+
+        คะแนนต่ำ = ดี (เป็น cost function)
+        """
+
+        from itertools import permutations
+
+        ref_ear = side_points["ear"]
+        ref_shoulder = side_points["shoulder"]
+        ref_c7 = self._estimate_c7(
+            side_points=side_points,
+            width=width,
+            height=height,
+        )
+
+        forward_direction = getattr(config, "CAMERA_FORWARD_DIRECTION", 1)
+
+        # ขนาดอ้างอิงไว้ normalize ระยะ
+        body_scale = max(self._distance(ref_ear, ref_shoulder), 1.0)
+
+        # ใช้ assignment เฟรมก่อนเป็น anchor เพิ่มเติม (ถ้ามี)
+        # ช่วยให้ frame-to-frame consistent ขึ้น ไม่สลับ C7 / Humerus
+        last = self._last_marker_assignment
+
+        best_score: float = float("inf")
+        best_assignment: Optional[dict[str, Point]] = None
+
+        # ลองทุก triplet (เลือก 3 จาก candidates) ทุกการสลับลำดับ
+        for triplet in permutations(candidates, 3):
+            ear_candidate, c7_candidate, shoulder_candidate = triplet
+
+            score = self._score_marker_assignment(
+                ear=ear_candidate,
+                c7=c7_candidate,
+                shoulder=shoulder_candidate,
+                ref_ear=ref_ear,
+                ref_c7=ref_c7,
+                ref_shoulder=ref_shoulder,
+                body_scale=body_scale,
+                forward_direction=forward_direction,
+                last_assignment=last,
+            )
+
+            if score < best_score:
+                best_score = score
+                best_assignment = {
+                    "ear": ear_candidate,
+                    "c7": c7_candidate,
+                    "shoulder": shoulder_candidate,
+                }
+
+        # threshold เพื่อกันกรณีคะแนนแย่มาก (marker หลุดร่างไกล) ให้ fallback ไป MediaPipe
+        max_acceptable_score = getattr(config, "MARKER_ASSIGNMENT_MAX_COST", 2.5)
+
+        if best_score > max_acceptable_score:
+            return None
+
+        # บันทึก assignment ไว้ใช้เป็น anchor เฟรมต่อไป
+        self._last_marker_assignment = best_assignment
+
+        return best_assignment
+
+    def _score_marker_assignment(
+        self,
+        ear: Point,
+        c7: Point,
+        shoulder: Point,
+        ref_ear: Point,
+        ref_c7: Point,
+        ref_shoulder: Point,
+        body_scale: float,
+        forward_direction: int,
+        last_assignment: Optional[dict[str, Point]] = None,
+    ) -> float:
+        """
+        ให้คะแนน (cost) ของการ assign marker แบบ 1 ชุด
+        ค่ายิ่งต่ำยิ่งดี
+
+        ประกอบด้วย:
+        1. Proximity cost — marker ควรอยู่ใกล้จุดอ้างอิง MediaPipe ที่สมเหตุสมผล
+        2. Vertical order penalty — ลำดับแกน Y ควรเป็น ear -> c7 -> shoulder
+        3. C7 horizontal penalty — C7 ควรอยู่ "ด้านหลัง" shoulder ตามทิศ camera
+        4. C7 vertical position — C7 ควรอยู่ระหว่าง ear กับ shoulder ในแนวตั้ง
+        5. Temporal consistency — penalize ถ้าจุดกระโดดห่างจากเฟรมก่อน
+        """
+
+        # --- 1) Proximity cost (น้ำหนักหลัก) ---
+        # ระยะห่างจาก reference / body scale
+        ear_dist = self._distance(ear, ref_ear) / body_scale
+        c7_dist = self._distance(c7, ref_c7) / body_scale
+        shoulder_dist = self._distance(shoulder, ref_shoulder) / body_scale
+
+        proximity_cost = ear_dist + c7_dist + shoulder_dist
+
+        # --- 2) Vertical order penalty ---
+        # ear ต้องอยู่บนสุด, shoulder ต้องอยู่ล่างสุด
+        # ถ้าลำดับผิด ลงโทษหนัก
+        order_penalty = 0.0
+
+        if ear.y >= c7.y:
+            # ear ควรอยู่สูงกว่า c7 (y น้อยกว่า)
+            order_penalty += (ear.y - c7.y + 1) / body_scale * 2.0
+
+        if c7.y >= shoulder.y + (body_scale * 0.05):
+            # c7 ไม่ควรต่ำกว่า shoulder เกิน 5% ของ body scale
+            # ยอมให้ใกล้กันได้ เพราะบางคน C7 กับหัวไหล่ Y ใกล้กันจริง
+            order_penalty += (c7.y - shoulder.y) / body_scale * 1.5
+
+        if ear.y >= shoulder.y:
+            # ear ต้องอยู่สูงกว่า shoulder เสมอ
+            order_penalty += (ear.y - shoulder.y + 1) / body_scale * 3.0
+
+        # --- 3) C7 ควรอยู่ด้านหลัง shoulder ตามทิศกล้อง ---
+        # forward_direction = 1 หมายถึงหน้าผู้ใช้อยู่ทางขวาของภาพ
+        # ดังนั้น "ด้านหลัง" = ทาง -x (x น้อยกว่า shoulder)
+        back_penalty = 0.0
+        c7_forwardness = forward_direction * (c7.x - shoulder.x)
+
+        if c7_forwardness > 0:
+            # C7 ดันมาอยู่ด้านหน้า shoulder = ผิด anatomy
+            back_penalty = c7_forwardness / body_scale * 1.5
+
+        # --- 4) C7 ควรอยู่ระหว่าง ear กับ shoulder ในแนวตั้ง (โดยประมาณ) ---
+        # อนุญาตให้ C7 ใกล้ shoulder ได้ เพราะ C7 ติดบนคอใกล้โคน
+        c7_vertical_penalty = 0.0
+        if not (ear.y <= c7.y <= shoulder.y + body_scale * 0.10):
+            # ออกนอกช่วงที่สมเหตุสมผล
+            if c7.y < ear.y:
+                c7_vertical_penalty = (ear.y - c7.y) / body_scale
+            elif c7.y > shoulder.y + body_scale * 0.10:
+                c7_vertical_penalty = (c7.y - shoulder.y) / body_scale
+
+        # --- 5) Temporal consistency (penalize ถ้ากระโดดจากเฟรมก่อน) ---
+        # น้ำหนักไม่หนักมาก เพื่อให้ยังอัปเดตตาม MediaPipe ใหม่ได้
+        temporal_cost = 0.0
+        if last_assignment is not None:
+            temporal_weight = getattr(
+                config, "MARKER_TEMPORAL_WEIGHT", 0.6
+            )
+
+            d_ear = self._distance(ear, last_assignment["ear"]) / body_scale
+            d_c7 = self._distance(c7, last_assignment["c7"]) / body_scale
+            d_sh = self._distance(shoulder, last_assignment["shoulder"]) / body_scale
+
+            temporal_cost = (d_ear + d_c7 + d_sh) * temporal_weight
+
+        return (
+            proximity_cost
+            + order_penalty
+            + back_penalty
+            + c7_vertical_penalty
+            + temporal_cost
+        )
+
+    def _filter_body_markers(
+        self,
+        markers: list[Point],
+        side_points: dict[str, Point],
+        width: int,
+        height: int,
+    ) -> list[Point]:
+        """
+        กรอง marker ที่อยู่บริเวณร่างกายครึ่งบน
+        เพื่อกันสีเขียวอื่นในฉากหลังหลุดเข้ามา
+
+        ใช้ "body scale" จากระยะ ear -> shoulder เป็นตัวกำหนดขอบเขต
+        เพราะการใช้ % ของ width/height ตรง ๆ จะกว้างเกินจริงเมื่อผู้ใช้นั่งไกล
+        และแคบเกินไปเมื่อผู้ใช้นั่งใกล้
+        """
+
+        ear = side_points["ear"]
+        shoulder = side_points["shoulder"]
+        c7 = self._estimate_c7(
+            side_points=side_points,
+            width=width,
+            height=height,
+        )
+
+        # ใช้ระยะ ear-shoulder เป็นมาตราส่วนของร่างกาย
+        body_scale = max(self._distance(ear, shoulder), 1.0)
+
+        # อนุญาตให้ marker อยู่ห่างจาก bounding box ของ anatomical points
+        # ไม่เกิน body_scale * margin ก็พอ ไม่ต้องกว้างเท่า width ทั้งภาพ
+        x_margin = body_scale * 0.9
+        y_margin_top = body_scale * 0.6
+        y_margin_bottom = body_scale * 0.8
+
+        min_x = min(ear.x, shoulder.x, c7.x) - x_margin
+        max_x = max(ear.x, shoulder.x, c7.x) + x_margin
+
+        min_y = min(ear.y, shoulder.y, c7.y) - y_margin_top
+        max_y = max(ear.y, shoulder.y, c7.y) + y_margin_bottom
+
+        return [
+            marker
+            for marker in markers
+            if min_x <= marker.x <= max_x and min_y <= marker.y <= max_y
+        ]
 
     def _estimate_tragus_from_ear(
         self,
         ear: Point,
         width: int,
     ) -> Point:
-        """ประมาณ tragus จาก MediaPipe ear landmark เฉพาะตอน fallback"""
+        """
+        ประมาณ tragus จาก MediaPipe ear landmark
 
-        forward_direction = int(getattr(config, "CAMERA_FORWARD_DIRECTION", 1))
-        offset_ratio = float(getattr(config, "TRAGUS_FORWARD_OFFSET_RATIO", 0.010))
+        MediaPipe ear มักอยู่กลาง/หลังใบหู
+        แต่ tragus อยู่ด้านหน้ารูหู
+        จึงขยับ ear ไปด้านหน้าเล็กน้อยตาม CAMERA_FORWARD_DIRECTION
+        """
+
+        forward_direction = getattr(config, "CAMERA_FORWARD_DIRECTION", 1)
+        offset_ratio = getattr(config, "TRAGUS_FORWARD_OFFSET_RATIO", 0.018)
 
         return Point(
             x=ear.x + (forward_direction * offset_ratio * width),
@@ -390,129 +696,74 @@ class PoseDetector:
 
     def _estimate_c7(
         self,
-        shoulder: Point,
+        side_points: dict[str, Point],
         width: int,
         height: int,
     ) -> Point:
-        """ประมาณตำแหน่ง C7 จาก shoulder"""
+        """
+        ประมาณตำแหน่ง C7
 
-        up_offset = float(getattr(config, "C7_UP_OFFSET_RATIO", 0.095)) * height
-        back_offset = float(getattr(config, "C7_BACK_OFFSET_RATIO", 0.050)) * width
+        MediaPipe ไม่มีจุด C7 โดยตรง
+        จึงประมาณจากแนวหัวไหล่ แล้วขยับขึ้นและถอยไปด้านหลังเล็กน้อย
 
-        forward_direction = int(getattr(config, "CAMERA_FORWARD_DIRECTION", 1))
+        หากต้องการความแม่นขึ้น ควรใช้ marker สีเขียวติดที่ C7
+        แล้วเปิด ENABLE_GREEN_MARKER_DETECTION ใน config.py
+        """
 
-        c7_x = shoulder.x - (forward_direction * back_offset)
-        c7_y = shoulder.y - up_offset
+        shoulder = side_points["shoulder"]
+        opposite_shoulder = side_points["opposite_shoulder"]
+
+        mid_x = (shoulder.x + opposite_shoulder.x) / 2
+        mid_y = (shoulder.y + opposite_shoulder.y) / 2
+
+        up_offset = getattr(config, "C7_UP_OFFSET_RATIO", 0.08) * height
+        back_offset = getattr(config, "C7_BACK_OFFSET_RATIO", 0.04) * width
+
+        forward_direction = getattr(config, "CAMERA_FORWARD_DIRECTION", 1)
+
+        c7_x = mid_x - (forward_direction * back_offset)
+        c7_y = mid_y - up_offset
+
+        visibility = min(
+            shoulder.visibility,
+            opposite_shoulder.visibility,
+        )
 
         return Point(
             x=c7_x,
             y=c7_y,
-            visibility=shoulder.visibility,
+            visibility=visibility,
         )
 
-    def _detect_yellow_tragus_marker(
-        self,
-        frame: np.ndarray,
-        side_points: dict[str, Point],
-        expected_ear: Point,
-        width: int,
-        height: int,
-    ) -> Optional[Point]:
-        """ตรวจ marker สีเหลืองเฉพาะบริเวณหู"""
+    # ========================
+    # Green marker detection
+    # ========================
 
-        if not bool(getattr(config, "ENABLE_GREEN_MARKER_DETECTION", False)):
-            return None
-
-        roi = self._build_head_roi(
-            side_points=side_points,
-            expected_ear=expected_ear,
-            width=width,
-            height=height,
-        )
-
-        return self._detect_yellow_marker_in_roi(
-            frame=frame,
-            roi=roi,
-            expected_point=expected_ear,
-            max_distance=float(getattr(config, "MARKER_MAX_DISTANCE_FROM_HEAD", 145)),
-            reject_point=None,
-        )
-
-    def _detect_yellow_shoulder_marker(
-        self,
-        frame: np.ndarray,
-        expected_shoulder: Point,
-        expected_ear: Point,
-        width: int,
-        height: int,
-    ) -> Optional[Point]:
-        """ตรวจ marker สีเหลืองเฉพาะบริเวณไหล่"""
-
-        if not bool(getattr(config, "ENABLE_SHOULDER_MARKER_DETECTION", True)):
-            return None
-
-        roi = self._build_shoulder_roi(
-            expected_shoulder=expected_shoulder,
-            width=width,
-            height=height,
-        )
-
-        return self._detect_yellow_marker_in_roi(
-            frame=frame,
-            roi=roi,
-            expected_point=expected_shoulder,
-            max_distance=float(getattr(config, "SHOULDER_MARKER_MAX_DISTANCE", 190)),
-            reject_point=expected_ear,
-        )
-
-    def _detect_yellow_marker_in_roi(
-        self,
-        frame: np.ndarray,
-        roi: Optional[tuple[int, int, int, int]],
-        expected_point: Point,
-        max_distance: float,
-        reject_point: Optional[Point] = None,
-    ) -> Optional[Point]:
+    def _detect_green_markers(self, frame: np.ndarray) -> list[Point]:
         """
-        ตรวจ marker สีเหลืองใน ROI ที่กำหนด
+        ตรวจจับ marker สีเขียวจากภาพด้วย HSV threshold
 
-        ปรับให้ robust ขึ้น:
-        - จับ marker เบลอได้
-        - ไม่ต้อง circular เป๊ะ
-        - ให้คะแนนจากระยะใกล้ expected point เป็นหลัก
+        ใช้เมื่อ:
+        ENABLE_GREEN_MARKER_DETECTION = True
         """
 
-        if frame is None or roi is None or expected_point is None:
-            return None
+        if not getattr(config, "ENABLE_GREEN_MARKER_DETECTION", False):
+            return []
 
-        x1, y1, x2, y2 = roi
-
-        if x2 <= x1 or y2 <= y1:
-            return None
-
-        roi_frame = frame[y1:y2, x1:x2]
-
-        if roi_frame.size == 0:
-            return None
-
-        roi_frame = cv2.GaussianBlur(roi_frame, (5, 5), 0)
-        hsv = cv2.cvtColor(roi_frame, cv2.COLOR_BGR2HSV)
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
         lower = np.array(
-            getattr(config, "GREEN_HSV_LOWER", (18, 45, 45)),
+            getattr(config, "GREEN_HSV_LOWER", (35, 80, 80)),
             dtype=np.uint8,
         )
         upper = np.array(
-            getattr(config, "GREEN_HSV_UPPER", (45, 255, 255)),
+            getattr(config, "GREEN_HSV_UPPER", (85, 255, 255)),
             dtype=np.uint8,
         )
 
         mask = cv2.inRange(hsv, lower, upper)
 
-        kernel_size = int(getattr(config, "GREEN_MARKER_KERNEL_SIZE", 5))
-        kernel_size = max(3, kernel_size)
-
-        kernel = np.ones((kernel_size, kernel_size), np.uint8)
+        kernel = np.ones((5, 5), np.uint8)
         mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
         mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
 
@@ -522,14 +773,10 @@ class PoseDetector:
             cv2.CHAIN_APPROX_SIMPLE,
         )
 
-        if not contours:
-            return None
+        min_area = getattr(config, "GREEN_MARKER_MIN_AREA", 40)
+        max_area = getattr(config, "GREEN_MARKER_MAX_AREA", 3000)
 
-        min_area = float(getattr(config, "GREEN_MARKER_MIN_AREA", 10))
-        max_area = float(getattr(config, "GREEN_MARKER_MAX_AREA", 2500))
-        min_circularity = float(getattr(config, "GREEN_MARKER_MIN_CIRCULARITY", 0.12))
-
-        candidates: list[tuple[float, Point]] = []
+        markers: list[Point] = []
 
         for contour in contours:
             area = cv2.contourArea(contour)
@@ -537,126 +784,76 @@ class PoseDetector:
             if area < min_area or area > max_area:
                 continue
 
-            perimeter = cv2.arcLength(contour, True)
-
-            if perimeter <= 0:
-                continue
-
-            circularity = 4.0 * math.pi * area / (perimeter * perimeter)
-
-            if circularity < min_circularity:
-                continue
-
             moments = cv2.moments(contour)
 
             if moments["m00"] == 0:
                 continue
 
-            cx = float(moments["m10"] / moments["m00"]) + x1
-            cy = float(moments["m01"] / moments["m00"]) + y1
+            cx = moments["m10"] / moments["m00"]
+            cy = moments["m01"] / moments["m00"]
 
-            marker = Point(
-                x=cx,
-                y=cy,
-                visibility=1.0,
+            markers.append(
+                Point(
+                    x=float(cx),
+                    y=float(cy),
+                    visibility=1.0,
+                )
             )
 
-            distance = self._distance(marker, expected_point)
+        return markers
 
-            if distance > max_distance:
+    def _nearest_marker(
+        self,
+        markers: list[Point],
+        target: Point,
+        used_indices: set[int],
+        max_distance: float,
+    ) -> Optional[tuple[Point, int]]:
+        """หา marker ที่อยู่ใกล้ target ที่สุด"""
+
+        best_index: Optional[int] = None
+        best_distance: float = float("inf")
+
+        for index, marker in enumerate(markers):
+            if index in used_indices:
                 continue
 
-            if reject_point is not None:
-                reject_distance = self._distance(marker, reject_point)
-                min_reject_distance = float(
-                    getattr(config, "SHOULDER_MARKER_MIN_DISTANCE_FROM_EAR", 85)
-                )
+            distance = self._distance(marker, target)
 
-                if reject_distance < min_reject_distance:
-                    continue
+            if distance < best_distance:
+                best_distance = distance
+                best_index = index
 
-            score = (
-                distance
-                - (circularity * 5.0)
-                - min(area * 0.006, 8.0)
-            )
-
-            candidates.append((score, marker))
-
-        if not candidates:
+        if best_index is None:
             return None
 
-        candidates.sort(key=lambda item: item[0])
-
-        return candidates[0][1]
-
-    def _build_head_roi(
-        self,
-        side_points: dict[str, Point],
-        expected_ear: Point,
-        width: int,
-        height: int,
-    ) -> Optional[tuple[int, int, int, int]]:
-        """สร้าง ROI เฉพาะบริเวณหู"""
-
-        points: list[Point] = []
-
-        if expected_ear is not None:
-            points.append(expected_ear)
-
-        ear = side_points.get("ear")
-        nose = side_points.get("nose")
-
-        if ear is not None:
-            points.append(ear)
-
-        if nose is not None:
-            points.append(nose)
-
-        if not points:
+        if best_distance > max_distance:
             return None
 
-        margin_x = int(getattr(config, "MARKER_ROI_HEAD_MARGIN_X", 120))
-        margin_y = int(getattr(config, "MARKER_ROI_HEAD_MARGIN_Y", 105))
+        return markers[best_index], best_index
 
-        min_x = min(point.x for point in points) - margin_x
-        max_x = max(point.x for point in points) + margin_x
-        min_y = min(point.y for point in points) - margin_y
-        max_y = max(point.y for point in points) + margin_y
+    @staticmethod
+    def _distance(p1: Point, p2: Point) -> float:
+        dx = p1.x - p2.x
+        dy = p1.y - p2.y
+        return math.sqrt((dx * dx) + (dy * dy))
 
-        x1 = max(0, int(min_x))
-        x2 = min(width, int(max_x))
-        y1 = max(0, int(min_y))
-        y2 = min(height, int(max_y))
-
-        return x1, y1, x2, y2
-
-    def _build_shoulder_roi(
-        self,
-        expected_shoulder: Point,
-        width: int,
-        height: int,
-    ) -> Optional[tuple[int, int, int, int]]:
-        """สร้าง ROI เฉพาะบริเวณไหล่"""
-
-        if expected_shoulder is None:
-            return None
-
-        margin_x = int(getattr(config, "SHOULDER_MARKER_ROI_MARGIN_X", 190))
-        margin_y = int(getattr(config, "SHOULDER_MARKER_ROI_MARGIN_Y", 160))
-
-        x1 = max(0, int(expected_shoulder.x - margin_x))
-        x2 = min(width, int(expected_shoulder.x + margin_x))
-        y1 = max(0, int(expected_shoulder.y - margin_y))
-        y2 = min(height, int(expected_shoulder.y + margin_y))
-
-        return x1, y1, x2, y2
+    # ========================
+    # Angle calculation
+    # ========================
 
     def _calculate_cva(self, ear: Point, c7: Point) -> Optional[float]:
         """
         CVA = มุมระหว่างเส้น C7 -> EAR กับเส้นแนวนอนผ่าน C7
 
-        ค่ายิ่งน้อย = คอยื่นมากขึ้น
+        จุดยอดของมุมคือ:
+        - C7
+
+        เส้นที่ใช้วัด:
+        - เส้นแนวนอนผ่าน C7
+        - เส้นจาก C7 ไปยังกกหู / Tragus
+
+        ค่ายิ่งน้อย = มีแนวโน้มคอยื่นมากขึ้น
         """
 
         dx = ear.x - c7.x
@@ -674,11 +871,18 @@ class PoseDetector:
         """
         FSA = มุมระหว่างเส้น SHOULDER -> C7 กับเส้นแนวนอนผ่านหัวไหล่
 
-        ค่ายิ่งน้อย = ไหล่ห่อมากขึ้น
+        จุดยอดของมุมคือ:
+        - shoulder / หัวไหล่
+
+        เส้นที่ใช้วัด:
+        - เส้นแนวนอนผ่านหัวไหล่
+        - เส้นจากหัวไหล่ไปยัง C7
+
+        ค่ายิ่งน้อย = มีแนวโน้มไหล่ห่อมากขึ้น
         """
 
         dx = c7.x - shoulder.x
-        dy = shoulder.y - c7.y
+        dy = shoulder.y - c7.y  # กลับแกน y เพราะภาพ y เพิ่มลงล่าง
 
         if abs(dx) < 1 and abs(dy) < 1:
             return None
@@ -688,6 +892,10 @@ class PoseDetector:
 
         return round(angle_deg, 1)
 
+    # ========================
+    # Drawing
+    # ========================
+
     def _draw_posture_overlay(
         self,
         frame: np.ndarray,
@@ -695,30 +903,53 @@ class PoseDetector:
         cva_angle: Optional[float] = None,
         fsa_angle: Optional[float] = None,
     ) -> None:
-        """วาด overlay สำหรับอธิบายการวัดมุม"""
+        """
+        วาด overlay สำหรับอธิบายการวัดมุม:
+
+        CVA:
+        - เส้นแนวนอนผ่าน C7 สีเหลือง
+        - เส้นจาก C7 ไปกกหู
+
+        FSA:
+        - เส้นแนวนอนผ่านหัวไหล่ สีเหลือง
+        - เส้นจากหัวไหล่ไป C7
+
+        หมายเหตุ:
+        - ไม่แสดงตัวเลขมุมบนภาพ เพื่อลดความรกของหน้าจอ
+        """
 
         ear = reference_points["ear"]
         c7 = reference_points["c7"]
         shoulder = reference_points["shoulder"]
 
-        ear_color = (0, 220, 80)
-        c7_color = (0, 0, 255)
-        shoulder_color = (255, 120, 0)
+        # สี BGR ของ OpenCV
+        ear_color = (0, 220, 80)          # เขียว = กกหู / Tragus
+        c7_color = (0, 0, 255)            # แดง = C7
+        shoulder_color = (255, 120, 0)    # ฟ้า/น้ำเงิน = หัวไหล่
 
-        diagonal_line_color = (255, 255, 255)
-        reference_color = (0, 220, 255)
+        diagonal_line_color = (255, 255, 255)  # ขาว = เส้นวัดมุม
+        reference_color = (0, 220, 255)        # เหลือง = เส้นแนวนอนอ้างอิง
 
+        # ความยาวเส้นแนวนอน
         ref_left = 120
         ref_right = 160
 
+        # ========================
+        # CVA: เส้นแนวนอนผ่าน C7
+        # ========================
+
+        c7_horizontal_left = Point(x=c7.x - ref_left, y=c7.y)
+        c7_horizontal_right = Point(x=c7.x + ref_right, y=c7.y)
+
         self._draw_line(
             frame,
-            Point(x=c7.x - ref_left, y=c7.y),
-            Point(x=c7.x + ref_right, y=c7.y),
+            c7_horizontal_left,
+            c7_horizontal_right,
             reference_color,
             thickness=1,
         )
 
+        # เส้นจาก C7 ไปกกหู
         self._draw_line(
             frame,
             c7,
@@ -727,14 +958,28 @@ class PoseDetector:
             thickness=2,
         )
 
+        # ========================
+        # FSA: เส้นแนวนอนผ่านหัวไหล่
+        # ========================
+
+        shoulder_horizontal_left = Point(
+            x=shoulder.x - ref_left,
+            y=shoulder.y,
+        )
+        shoulder_horizontal_right = Point(
+            x=shoulder.x + ref_right,
+            y=shoulder.y,
+        )
+
         self._draw_line(
             frame,
-            Point(x=shoulder.x - ref_left, y=shoulder.y),
-            Point(x=shoulder.x + ref_right, y=shoulder.y),
+            shoulder_horizontal_left,
+            shoulder_horizontal_right,
             reference_color,
             thickness=1,
         )
 
+        # เส้นจากหัวไหล่ไป C7
         self._draw_line(
             frame,
             shoulder,
@@ -743,64 +988,13 @@ class PoseDetector:
             thickness=2,
         )
 
+        # ========================
+        # จุด landmark
+        # ========================
+
         self._draw_point(frame, ear, ear_color, radius=6)
         self._draw_point(frame, c7, c7_color, radius=6)
         self._draw_point(frame, shoulder, shoulder_color, radius=6)
-
-    def _draw_debug_info(
-        self,
-        frame: np.ndarray,
-        cva_angle: Optional[float],
-        fsa_angle: Optional[float],
-        shoulder: Point,
-    ) -> None:
-        """วาด debug text สำหรับ fine tune"""
-
-        if not getattr(config, "DEBUG_DRAW_VALUES", False):
-            return
-
-        cva_text = "CVA: -" if cva_angle is None else f"CVA: {cva_angle:.1f}"
-        fsa_text = "FSA: -" if fsa_angle is None else f"FSA: {fsa_angle:.1f}"
-        ear_text = f"EAR: {self._last_ear_source}"
-        shoulder_text = f"SHOULDER: {self._last_shoulder_source}"
-        shoulder_vis_text = f"R_SHOULDER VIS: {shoulder.visibility:.2f}"
-
-        self._draw_debug_status(frame, cva_text, y=26)
-        self._draw_debug_status(frame, fsa_text, y=50)
-        self._draw_debug_status(frame, ear_text, y=74)
-        self._draw_debug_status(frame, shoulder_text, y=98)
-        self._draw_debug_status(frame, shoulder_vis_text, y=122)
-
-    def _draw_debug_status(
-        self,
-        frame: np.ndarray,
-        text: str,
-        y: int = 30,
-        color: tuple[int, int, int] = (255, 255, 255),
-    ) -> None:
-        """วาดข้อความ debug"""
-
-        cv2.putText(
-            frame,
-            text,
-            (14, y),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.55,
-            (0, 0, 0),
-            4,
-            cv2.LINE_AA,
-        )
-
-        cv2.putText(
-            frame,
-            text,
-            (14, y),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.55,
-            color,
-            1,
-            cv2.LINE_AA,
-        )
 
     def _draw_point(
         self,
@@ -847,9 +1041,3 @@ class PoseDetector:
             thickness,
             cv2.LINE_AA,
         )
-
-    @staticmethod
-    def _distance(p1: Point, p2: Point) -> float:
-        dx = p1.x - p2.x
-        dy = p1.y - p2.y
-        return math.sqrt((dx * dx) + (dy * dy))

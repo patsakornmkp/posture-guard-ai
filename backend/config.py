@@ -1,81 +1,25 @@
-# backend/config.py
+# config.py
 # ค่าคงที่ทั้งหมดของระบบ PostureGuard Backend
 #
-# เกณฑ์ที่ใช้:
-# - CVA > 50°  = ปกติ
-# - CVA <= 50° = คอยื่น
-# - FSA > 54°  = ปกติ
-# - FSA <= 54° = ไหล่ห่อ / ไหล่งุ้ม
-#
-# โหมดกล้อง:
-# - วางกล้องด้านขวาของผู้ใช้
-# - detector.py ใช้ RIGHT_EAR / RIGHT_SHOULDER เป็นตำแหน่งคาดเดาเริ่มต้น
-#
-# Marker:
-# - marker สีเหลืองจุดที่ 1 = หู / tragus
-# - marker สีเหลืองจุดที่ 2 = ไหล่ / shoulder
-# - C7 คำนวณจาก shoulder หลังเลือก marker แล้ว
+# เวอร์ชันใหม่:
+# - ตรวจภาวะคอยื่นด้วย CVA
+# - ตรวจภาวะไหล่ห่อด้วย FSA
+# - ตัดระดับเฝ้าระวังออก เหลือแค่ ปกติ / อันตราย
+# - ไม่ใช้ท่าคอยื่นร่วมกับไหล่ห่อเป็นประเภทแยก
+# - ไม่ใช้ hip landmark เป็นเงื่อนไขหลักของระบบ
+# - ใช้ marker สีเขียวเฉพาะจุดกกหู / tragus เป็นตัวช่วย
+# - แยกเวลาจับคอยื่นและไหล่ห่อ
+# - แจ้งเตือนเมื่อผิดท่าต่อเนื่องครบ 3 นาที
+# - หากยังผิดท่าต่อเนื่อง ให้แจ้งเตือนซ้ำทุก 3 นาที
 
-from __future__ import annotations
-
-import os
 from pathlib import Path
-
 
 # ========================
 # Paths
 # ========================
 
 BASE_DIR: Path = Path(__file__).resolve().parent.parent
-BACKEND_DIR: Path = Path(__file__).resolve().parent
 DATABASE_PATH: Path = BASE_DIR / "database" / "posture.db"
-ENV_PATH: Path = BACKEND_DIR / ".env"
-
-
-# ========================
-# Simple .env Reader
-# ========================
-
-def _load_env_file() -> dict[str, str]:
-    env: dict[str, str] = {}
-
-    if not ENV_PATH.exists():
-        return env
-
-    try:
-        for raw_line in ENV_PATH.read_text(encoding="utf-8").splitlines():
-            line = raw_line.strip()
-
-            if not line or line.startswith("#"):
-                continue
-
-            if "=" not in line:
-                continue
-
-            key, value = line.split("=", 1)
-            key = key.strip()
-            value = value.strip().strip('"').strip("'")
-
-            if key:
-                env[key] = value
-
-    except Exception as err:
-        print(f"[CONFIG] Cannot read .env: {err}")
-
-    return env
-
-
-_ENV_FILE_VALUES = _load_env_file()
-
-
-def _env(key: str, default: str = "") -> str:
-    return os.getenv(key) or _ENV_FILE_VALUES.get(key, default)
-
-
-def _env_bool(key: str, default: bool = False) -> bool:
-    raw = _env(key, str(default)).strip().lower()
-    return raw in {"1", "true", "yes", "y", "on"}
-
 
 # ========================
 # Camera
@@ -87,179 +31,182 @@ CAMERA_HEIGHT: int = 480
 CAMERA_FPS: int = 15
 JPEG_QUALITY: int = 60
 
-
 # ========================
 # Performance
 # ========================
 
+# ให้ MediaPipe ประมวลผลทุกกี่เฟรม
+# 1 = แม่น/สดสุด แต่หนักสุด
+# 2 = แนะนำ ตรวจจับได้ดีและเบาลง
+# 3 = เบาขึ้นอีก แต่ค่าจะอัปเดตช้ากว่า
 PROCESS_EVERY_N_FRAMES: int = 2
-JPEG_CACHE_SECONDS: float = 0.20
 
+# cache JPEG เพื่อลดการ encode ภาพซ้ำถี่เกินไป
+JPEG_CACHE_SECONDS: float = 0.20
 
 # ========================
 # MediaPipe Pose
 # ========================
 
-MP_MIN_DETECTION_CONFIDENCE: float = 0.55
-MP_MIN_TRACKING_CONFIDENCE: float = 0.55
+# ความมั่นใจขั้นต่ำของ MediaPipe
+MP_MIN_DETECTION_CONFIDENCE: float = 0.70
+MP_MIN_TRACKING_CONFIDENCE: float = 0.70
 
-MIN_VISIBILITY: float = 0.35
+# visibility ขั้นต่ำของ landmark ที่จะนำมาใช้
+MIN_VISIBILITY: float = 0.65
 
-LANDMARK_SMOOTHING_ALPHA: float = 0.25
+# Smoothing สำหรับ landmark
+# 0.25 = นิ่งมาก แต่หน่วงกว่า
+# 0.30 = แนะนำ จุดนิ่งขึ้น เหมาะกับการวัดมุม
+# 0.45 = สมดุล แต่จุดอาจสั่นกว่า
+# 0.60 = ไวกว่าแต่สั่นกว่า
+LANDMARK_SMOOTHING_ALPHA: float = 0.30
 
+# วาดเฉพาะจุดที่ใช้จริง ไม่วาด skeleton ทั้งตัว
 DRAW_FULL_BODY_SKELETON: bool = False
 
-
-# ========================
-# Fixed Camera Direction
-# ========================
-
-# 1 = ด้านหน้าผู้ใช้อยู่ทางขวาของภาพ
-# -1 = ด้านหน้าผู้ใช้อยู่ทางซ้ายของภาพ
+# ทิศทางด้านหน้าของผู้ใช้ในภาพ
+# 1  = ด้านหน้าอยู่ทางขวาของภาพ
+# -1 = ด้านหน้าอยู่ทางซ้ายของภาพ
 CAMERA_FORWARD_DIRECTION: int = 1
-
 
 # ========================
 # CVA — Forward Head Posture / คอยื่น
 # ========================
+#
+# CVA = Craniovertebral Angle
+#
+# เกณฑ์ใหม่:
+# - ปกติ    : CVA >= 50 องศา
+# - อันตราย : CVA < 50 องศา
+#
+# ไม่มีระดับเฝ้าระวังแล้ว
 
-# ปกติ: CVA > 50
-# คอยื่น: CVA <= 50
-CVA_FORWARD_HEAD_THRESHOLD: float = 50.0
+FORWARD_HEAD_GOOD_THRESHOLD: float = 50.0
 
-# ชื่อเดิม เก็บไว้รองรับ classifier.py / โค้ดเดิม
-FORWARD_HEAD_GOOD_THRESHOLD: float = CVA_FORWARD_HEAD_THRESHOLD
-FORWARD_HEAD_BAD_THRESHOLD: float = CVA_FORWARD_HEAD_THRESHOLD
-FORWARD_HEAD_SEVERE_THRESHOLD: float = CVA_FORWARD_HEAD_THRESHOLD
-
+# เก็บไว้เพื่อรองรับโค้ดเดิม แต่ใช้ค่าเดียวกับ GOOD_THRESHOLD
+FORWARD_HEAD_BAD_THRESHOLD: float = 50.0
+FORWARD_HEAD_SEVERE_THRESHOLD: float = 50.0
 
 # ========================
 # FSA — Rounded Shoulder Posture / ไหล่ห่อ
 # ========================
+#
+# FSA = Forward Shoulder Angle
+#
+# เกณฑ์ใหม่:
+# - ปกติ    : FSA >= 54 องศา
+# - อันตราย : FSA < 54 องศา
+#
+# ไม่มีระดับเฝ้าระวังแล้ว
 
-# ปกติ: FSA > 54
-# ไหล่ห่อ: FSA <= 54
-FSA_ROUNDED_SHOULDER_THRESHOLD: float = 54.0
+ROUNDED_SHOULDER_GOOD_THRESHOLD: float = 54.0
 
-# ชื่อเดิม เก็บไว้รองรับ classifier.py / โค้ดเดิม
-ROUNDED_SHOULDER_GOOD_THRESHOLD: float = FSA_ROUNDED_SHOULDER_THRESHOLD
-ROUNDED_SHOULDER_BAD_THRESHOLD: float = FSA_ROUNDED_SHOULDER_THRESHOLD
-ROUNDED_SHOULDER_SEVERE_THRESHOLD: float = FSA_ROUNDED_SHOULDER_THRESHOLD
-
+# เก็บไว้เพื่อรองรับโค้ดเดิม แต่ใช้ค่าเดียวกับ GOOD_THRESHOLD
+ROUNDED_SHOULDER_BAD_THRESHOLD: float = 54.0
+ROUNDED_SHOULDER_SEVERE_THRESHOLD: float = 54.0
 
 # ========================
 # C7 Estimation
 # ========================
+#
+# MediaPipe ไม่มี landmark C7 โดยตรง
+# ค่านี้ใช้ช่วยประมาณตำแหน่ง C7 จากตำแหน่งหัวไหล่
+#
+# ตอนนี้แนะนำให้ใช้ marker เฉพาะกกหู / tragus
+# ส่วน C7 ยังใช้ค่าประมาณจาก MediaPipe เพื่อลดปัญหา marker C7/ไหล่สลับกัน
 
-C7_UP_OFFSET_RATIO: float = 0.095
-C7_BACK_OFFSET_RATIO: float = 0.050
-
+C7_UP_OFFSET_RATIO: float = 0.08
+C7_BACK_OFFSET_RATIO: float = 0.04
 
 # ========================
 # Tragus Estimation
 # ========================
+#
+# MediaPipe ear landmark มักอยู่กลาง/หลังใบหู
+# จึงขยับไปด้านหน้าตาม CAMERA_FORWARD_DIRECTION เล็กน้อย
+# ถ้าเปิด marker สีเขียว ระบบจะใช้ marker กกหูแทนค่านี้
 
-TRAGUS_FORWARD_OFFSET_RATIO: float = 0.010
-
+TRAGUS_FORWARD_OFFSET_RATIO: float = 0.018
 
 # ========================
-# Yellow Marker Detection
+# Green Marker Detection
 # ========================
+#
+# ตอนนี้ใช้ marker สีเขียวเฉพาะจุดกกหู / tragus เท่านั้น
+# ไม่ใช้ marker C7 และ shoulder เพื่อลดปัญหาจุดสลับกัน
 
 ENABLE_GREEN_MARKER_DETECTION: bool = True
 
-# HSV สำหรับ marker สีเหลือง
-# ช่วงนี้กว้างขึ้นเพื่อให้จับ marker ที่แสงไม่เท่ากันได้
-GREEN_HSV_LOWER: tuple[int, int, int] = (18, 45, 45)
-GREEN_HSV_UPPER: tuple[int, int, int] = (45, 255, 255)
+# สีเขียว
+GREEN_HSV_LOWER: tuple[int, int, int] = (35, 80, 80)
+GREEN_HSV_UPPER: tuple[int, int, int] = (85, 255, 255)
 
-GREEN_MARKER_MIN_AREA: int = 10
-GREEN_MARKER_MAX_AREA: int = 2500
-GREEN_MARKER_KERNEL_SIZE: int = 5
-GREEN_MARKER_MIN_CIRCULARITY: float = 0.12
+# ถ้าเปลี่ยนไปใช้สีเหลือง ให้ใช้ประมาณนี้แทน
+# GREEN_HSV_LOWER: tuple[int, int, int] = (20, 80, 80)
+# GREEN_HSV_UPPER: tuple[int, int, int] = (35, 255, 255)
 
-
-# ========================
-# Ear Marker ROI
-# ========================
-
-MARKER_ROI_ENABLED: bool = True
-
-MARKER_ROI_HEAD_MARGIN_X: int = 120
-MARKER_ROI_HEAD_MARGIN_Y: int = 105
-
-MARKER_MAX_DISTANCE_FROM_HEAD: int = 145
-
+GREEN_MARKER_MIN_AREA: int = 40
+GREEN_MARKER_MAX_AREA: int = 10000
 
 # ========================
-# Shoulder Marker ROI
+# Marker Assignment Scoring
 # ========================
+#
+# พารามิเตอร์สำหรับการ assign marker -> (tragus, C7, humerus)
+# ใช้ anatomical scoring เพื่อกัน C7/Humerus สลับกัน
 
-ENABLE_SHOULDER_MARKER_DETECTION: bool = True
+# คะแนน cost สูงสุดที่ยอมรับ ถ้าเกินจะ fallback ไปใช้ MediaPipe
+# ต่ำ = เข้มงวด ตรวจไม่เจอจะ fallback ง่าย
+# สูง = ผ่อนปรน ใช้ marker แม้คะแนนไม่ดี
+MARKER_ASSIGNMENT_MAX_COST: float = 2.5
 
-SHOULDER_MARKER_ROI_MARGIN_X: int = 190
-SHOULDER_MARKER_ROI_MARGIN_Y: int = 160
-
-SHOULDER_MARKER_MAX_DISTANCE: int = 190
-
-# กันไม่ให้ shoulder ROI ไปเลือก marker หู
-SHOULDER_MARKER_MIN_DISTANCE_FROM_EAR: int = 85
-
-
-# ========================
-# Marker Smoothing / Sticky Tracking
-# ========================
-
-# ยิ่งน้อยยิ่งนิ่ง แต่ตอบสนองช้าลง
-MARKER_SMOOTHING_ALPHA: float = 0.18
-
-# ถ้า marker หายชั่วคราว ให้ใช้ตำแหน่งล่าสุดต่ออีกกี่ frame
-MARKER_HOLD_FRAMES: int = 8
-
-
-# ========================
-# Debug / Tuning
-# ========================
-
-DEBUG_DRAW_VALUES: bool = True
-DEBUG_DRAW_LANDMARK_SOURCE: bool = True
-
+# น้ำหนัก temporal consistency
+# 0 = ไม่สนเฟรมก่อนเลย (เปลี่ยนทันที)
+# 0.6 = แนะนำ ช่วยลดอาการสลับกะพริบ
+# 1.0+ = เกาะติดเฟรมก่อน อาจหน่วงตอนผู้ใช้ขยับ
+MARKER_TEMPORAL_WEIGHT: float = 0.6
 
 # ========================
 # Alert Timing
 # ========================
+#
+# แจ้งเตือนเมื่อผู้ใช้นั่งผิดท่าต่อเนื่องเกิน 3 นาที
+# 3 นาที = 180 วินาที
+#
+# Logic ใหม่:
+# - คอยื่นมี timer แยก
+# - ไหล่ห่อมี timer แยก
+# - ก่อนครบ 3 นาที ยังนับเป็นท่าทางเหมาะสม
+# - ครบ 3 นาทีแล้วจึง alert
+# - ถ้ายังผิดท่าต่อ ให้แจ้งเตือนซ้ำทุก 3 นาที
+# - ถ้ากลับมาปกติ reset timer ของปัญหานั้นทันที
 
+# ระยะเวลาที่ต้องผิดท่าต่อเนื่องก่อนแจ้งเตือน
+# 180 วินาที = 3 นาที
 ISSUE_ALERT_DURATION: float = 180.0
-ALERT_REPEAT_INTERVAL: float = 180.0
 
-ISSUE_REPEAT_ALERT_INTERVAL: float = ALERT_REPEAT_INTERVAL
+# ระยะเวลาแจ้งเตือนซ้ำ หากยังผิดท่าต่อเนื่อง
+# 180 วินาที = 3 นาที
+ISSUE_REPEAT_ALERT_INTERVAL: float = 180.0
 
+# ค่าเก่า เก็บไว้รองรับโค้ดเดิม
 BAD_POSTURE_DURATION_MILD: float = ISSUE_ALERT_DURATION
 BAD_POSTURE_DURATION_MODERATE: float = ISSUE_ALERT_DURATION
 BAD_POSTURE_DURATION_SEVERE: float = ISSUE_ALERT_DURATION
+
+# เก็บไว้รองรับโค้ดเดิม
 MULTI_ISSUE_ALERT_DURATION: float = ISSUE_ALERT_DURATION
+
+# ค่า default ของเวลารอก่อนแจ้งเตือน
 BAD_POSTURE_DURATION: float = ISSUE_ALERT_DURATION
 
+# ถ้ากลับมาดี จะ reset timer ทันทีใน classifier.py
 GRACE_PERIOD: float = 0.0
-ALERT_COOLDOWN: float = ALERT_REPEAT_INTERVAL
 
-
-# ========================
-# LINE Messaging API
-# ========================
-
-LINE_ENABLED: bool = _env_bool("LINE_ENABLED", False)
-LINE_CHANNEL_ACCESS_TOKEN: str = _env("LINE_CHANNEL_ACCESS_TOKEN", "")
-LINE_CHANNEL_SECRET: str = _env("LINE_CHANNEL_SECRET", "")
-LINE_USER_ID: str = _env("LINE_USER_ID", "")
-
-LINE_HTTP_TIMEOUT_SECONDS: float = 5.0
-
-LINE_VERIFY_WEBHOOK_SIGNATURE: bool = _env_bool(
-    "LINE_VERIFY_WEBHOOK_SIGNATURE",
-    True,
-)
-
+# หลังจากแจ้งเตือนแล้ว ถ้ายังผิดอยู่ จะเตือนซ้ำทุกกี่วินาที
+# ตั้งเป็น 180 เพื่อให้ตรงกับ ISSUE_REPEAT_ALERT_INTERVAL
+ALERT_COOLDOWN: float = ISSUE_REPEAT_ALERT_INTERVAL
 
 # ========================
 # Session Risk Level
