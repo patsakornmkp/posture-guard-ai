@@ -2,973 +2,957 @@
    History Page
    File: frontend/js/history.js
 
-   - ใช้ CVA สำหรับคอยื่น
-   - ใช้ FSA สำหรับไหล่ห่อ
-   - ไม่มี Calibration / Baseline
-   - ไม่มี hunched back / kyphosis
-   - แสดงจำนวนแจ้งเตือนรวม
-   - รองรับจำนวนแจ้งเตือนแยกคอยื่น / ไหล่ห่อ
-   - รองรับ effective_seated_seconds และ fallback สำหรับ session เก่า
-
-   UX minimal-change:
-   1) กันเข้า history ระหว่าง active monitoring
-   2) ถ้า session ยัง active ให้กลับ monitoring
-   3) ถ้าไม่ได้ login ให้กลับ login
-   4) แสดง loading/error ในหน้า ไม่ทำให้หน้าขาว
-   5) ปุ่มเริ่มใช้งานจาก empty state ตรวจ flow ก่อนกลับ setup
+   PostureGuard AI
+   - ใช้ endpoint GET /history/sessions/{user_id}
+   - ใช้ localStorage currentUser จาก app.js
+   - Session ต่ำกว่า 5 วินาที = ไม่สมบูรณ์
+   - ไม่ให้ session 0 วินาทีแสดง Good posture 100%
+   - ปรับ session card ให้ compact และอ่านง่ายขึ้น
 ========================================= */
 
 (function () {
     "use strict";
 
-    const $ = (id) => document.getElementById(id);
-
     let allSessions = [];
-    let isLoading = false;
+    let filteredSessions = [];
+
+    let activeFilter = "all";
+    let activeSort = "latest";
+
+    const MIN_COMPLETE_SESSION_SECONDS = 180;
+
+    const $ = (id) => document.getElementById(id);
 
     document.addEventListener("DOMContentLoaded", async () => {
         if (!window.api || !window.utils) {
-            renderError(
-                "ระบบ frontend โหลดไม่ครบ",
-                "กรุณาตรวจสอบว่า app.js ถูกเรียกก่อน history.js"
-            );
-
-            window.setTimeout(() => {
-                window.location.replace("login.html");
-            }, 1200);
-
+            alert("ระบบ frontend โหลดไม่ครบ กรุณาตรวจสอบว่า app.js ถูกโหลดก่อน history.js");
+            window.location.replace("login.html");
             return;
         }
 
-        renderLoading();
-        setupControls();
-        setupListDelegation();
+        if (typeof utils.requireHistoryAccess === "function") {
+            const canOpenHistory = await utils.requireHistoryAccess();
 
-        const canViewHistory = await utils.requireHistoryAccess();
-
-        if (!canViewHistory) {
-            return;
+            if (!canOpenHistory) {
+                return;
+            }
         }
+
+        setupToolbar();
+        setupStartButtonGuard();
 
         await loadHistory();
     });
 
     /* =========================
-       Load History
+       Initial Load
     ========================= */
 
     async function loadHistory() {
-        if (isLoading) {
+        const user = getCurrentUserSafe();
+        const userId = getUserId(user);
+
+        if (!userId) {
+            utils.redirectTo("login.html", { replace: true });
             return;
         }
 
-        isLoading = true;
-        renderLoading();
+        showState(
+            "กำลังโหลดประวัติ",
+            "ระบบกำลังดึงข้อมูล session ย้อนหลังของคุณ",
+            true
+        );
 
         try {
-            const user = utils.getCurrentUser();
+            const response = await fetchHistorySessions(userId);
+            const sessions = normalizeHistoryResponse(response);
 
-            if (!user || !user.id) {
-                utils.redirectTo("login.html", { replace: true });
-                return;
+            allSessions = sessions
+                .map(normalizeSession)
+                .filter(Boolean);
+
+            filteredSessions = [...allSessions];
+
+            renderPage();
+
+            hideState();
+
+            const content = $("historyContent");
+
+            if (content) {
+                content.hidden = false;
             }
-
-            const result = await api.getHistory(user.id, 50);
-            allSessions = normalizeSessions(result.sessions || []);
-
-            renderHistoryPage();
         } catch (err) {
-            console.error("history load error:", err);
+            console.error("Load history failed:", err);
 
-            renderError(
+            showState(
                 "โหลดประวัติไม่สำเร็จ",
-                "โปรดตรวจสอบว่า backend เปิดอยู่ และ endpoint ประวัติการใช้งานทำงานถูกต้อง"
+                "ไม่สามารถดึงข้อมูลย้อนหลังได้ กรุณาตรวจสอบว่า backend เปิดอยู่ แล้วลองใหม่อีกครั้ง",
+                false
             );
-        } finally {
-            isLoading = false;
         }
+    }
+
+    async function fetchHistorySessions(userId) {
+        if (window.api && typeof api.getHistory === "function") {
+            return await api.getHistory(userId, 100);
+        }
+
+        const baseUrl = getApiBase();
+        const response = await fetch(`${baseUrl}/history/sessions/${userId}?limit=100`);
+
+        if (!response.ok) {
+            throw new Error(`History request failed: ${response.status}`);
+        }
+
+        return await response.json();
+    }
+
+    function normalizeHistoryResponse(response) {
+        if (!response) {
+            return [];
+        }
+
+        if (Array.isArray(response)) {
+            return response;
+        }
+
+        if (Array.isArray(response.sessions)) {
+            return response.sessions;
+        }
+
+        if (Array.isArray(response.data)) {
+            return response.data;
+        }
+
+        if (Array.isArray(response.history)) {
+            return response.history;
+        }
+
+        return [];
     }
 
     /* =========================
-       Controls
+       Toolbar
     ========================= */
 
-    function setupControls() {
-        const riskFilter = $("riskFilter");
-        const sortMode = $("sortMode");
+    function setupToolbar() {
+        const filterButtons = document.querySelectorAll("[data-range-filter]");
+        const sortSelect = $("sortMode");
 
-        if (riskFilter) {
-            riskFilter.addEventListener("change", renderHistoryPage);
-        }
+        filterButtons.forEach((button) => {
+            button.addEventListener("click", () => {
+                activeFilter = button.dataset.rangeFilter || "all";
 
-        if (sortMode) {
-            sortMode.addEventListener("change", renderHistoryPage);
+                filterButtons.forEach((btn) => {
+                    btn.classList.toggle("is-active", btn === button);
+                });
+
+                renderPage();
+            });
+        });
+
+        if (sortSelect) {
+            activeSort = sortSelect.value || "latest";
+
+            sortSelect.addEventListener("change", () => {
+                activeSort = sortSelect.value || "latest";
+                renderPage();
+            });
         }
     }
 
-    function setupListDelegation() {
-        const list = $("historyList");
+    function setupStartButtonGuard() {
+        const startBtn = $("startNewSessionBtn");
 
-        if (!list) {
+        if (!startBtn) {
             return;
         }
 
-        list.addEventListener("click", async (event) => {
-            const startLink = event.target.closest("[data-start-new-session]");
-
-            if (!startLink) {
-                return;
-            }
-
+        startBtn.addEventListener("click", async (event) => {
             event.preventDefault();
 
-            startLink.setAttribute("aria-disabled", "true");
-            startLink.style.pointerEvents = "none";
+            if (typeof utils.requireNoActiveMonitoring === "function") {
+                const canStart = await utils.requireNoActiveMonitoring();
 
-            const originalText = startLink.textContent;
-            startLink.textContent = "กำลังตรวจสอบ...";
-
-            try {
-                const canGoSetup = await utils.requireNoActiveMonitoring();
-
-                if (!canGoSetup) {
+                if (!canStart) {
                     return;
                 }
-
-                utils.redirectTo("setup.html", { replace: true });
-            } catch (err) {
-                console.error("history start new session error:", err);
-
-                startLink.textContent = originalText;
-                startLink.style.pointerEvents = "";
-                startLink.removeAttribute("aria-disabled");
-
-                renderError(
-                    "ไม่สามารถเริ่มใช้งานใหม่ได้",
-                    "กรุณาตรวจสอบว่า backend เปิดอยู่ แล้วลองอีกครั้ง"
-                );
             }
+
+            utils.redirectTo("setup.html", { replace: false });
         });
     }
 
     /* =========================
-       Normalize Data
+       Render Page
     ========================= */
 
-    function normalizeSessions(sessions) {
-        return sessions
-            .filter((session) => session.end_time !== null && session.end_time !== undefined)
-            .map((session) => {
-                const good = getNumber(
-                    session.good_seconds,
-                    session.good_posture_seconds,
-                    session.good,
-                    0
-                );
+    function renderPage() {
+        filteredSessions = sortSessions(
+            filterSessions(allSessions, activeFilter),
+            activeSort
+        );
 
-                const forward = getNumber(
-                    session.forward_head_seconds,
-                    session.forward,
-                    0
-                );
-
-                const rounded = getNumber(
-                    session.rounded_shoulder_seconds,
-                    session.rounded,
-                    0
-                );
-
-                const postureTotal = good + forward + rounded;
-
-                const rawEffective = getNumber(
-                    session.effective_seated_seconds,
-                    session.effective,
-                    0
-                );
-
-                const effective = rawEffective > 0
-                    ? rawEffective
-                    : postureTotal > 0
-                        ? postureTotal
-                        : 0;
-
-                const actualDuration = getNumber(
-                    session.actual_duration_seconds,
-                    session.actualDuration,
-                    getDurationFromDates(session.start_time, session.end_time),
-                    effective,
-                    0
-                );
-
-                const alertCount = getNumber(
-                    session.alert_count,
-                    session.alertCount,
-                    0
-                );
-
-                const forwardAlertCount = getNumber(
-                    session.forward_head_alert_count,
-                    session.forwardHeadAlertCount,
-                    0
-                );
-
-                const roundedAlertCount = getNumber(
-                    session.rounded_shoulder_alert_count,
-                    session.roundedShoulderAlertCount,
-                    0
-                );
-
-                const riskLevel = normalizeRisk(
-                    session.risk_level || session.riskLevel,
-                    good,
-                    forward,
-                    rounded
-                );
-
-                return {
-                    id: session.id || session.session_id || "",
-                    startTime: session.start_time,
-                    endTime: session.end_time,
-                    good,
-                    forward,
-                    rounded,
-                    effective,
-                    actualDuration,
-                    alertCount,
-                    forwardAlertCount,
-                    roundedAlertCount,
-                    riskLevel,
-                };
-            });
+        renderOverview(allSessions);
+        renderInsight(allSessions);
+        renderComposition(allSessions);
+        renderSessionList(filteredSessions);
+        renderCount(filteredSessions.length, allSessions.length);
     }
 
-    /* =========================
-       Main Render
-    ========================= */
+    function renderOverview(sessions) {
+        const totals = calculateTotals(sessions);
 
-    function renderHistoryPage() {
-        const completed = [...allSessions];
+        setText("histTotalSessions", totals.totalSessions);
+        setText("histTotalTime", formatDuration(totals.totalEffectiveSeconds));
+        setText("histAvgGood", totals.completedSessions > 0 ? `${totals.goodRatio.toFixed(0)}%` : "—");
+        setText("histTotalAlerts", totals.totalAlerts);
+    }
 
-        if (completed.length === 0) {
-            renderEmptyState();
+    function renderInsight(sessions) {
+        const totals = calculateTotals(sessions);
+
+        setText("histForwardTime", formatDuration(totals.forwardSeconds));
+        setText("histRoundedTime", formatDuration(totals.roundedSeconds));
+        setText("histForwardAlerts", `${totals.forwardAlerts} ครั้ง`);
+        setText("histRoundedAlerts", `${totals.roundedAlerts} ครั้ง`);
+
+        setText("overviewInsight", buildInsightText(totals));
+    }
+
+    function renderComposition(sessions) {
+        const totals = calculateTotals(sessions);
+
+        if (totals.completedSessions <= 0 || totals.totalEffectiveSeconds <= 0) {
+            setText("overviewGoodScore", "—");
+            setText("overviewGoodPct", "—");
+            setText("overviewForwardPct", "—");
+            setText("overviewRoundedPct", "—");
+
+            setWidth("overviewGoodBar", 0);
+            setWidth("overviewForwardBar", 0);
+            setWidth("overviewRoundedBar", 0);
             return;
         }
 
-        renderStats(completed);
-        renderOverviewChart(completed);
-        renderTrendLineChart(completed);
+        const total = Math.max(totals.totalEffectiveSeconds, 1);
 
-        const filtered = applyFilterAndSort(completed);
+        const goodPct = clamp((totals.goodSeconds / total) * 100, 0, 100);
+        const forwardPct = clamp((totals.forwardSeconds / total) * 100, 0, 100);
+        const roundedPct = clamp((totals.roundedSeconds / total) * 100, 0, 100);
 
-        const toolbar = $("historyToolbar");
-        if (toolbar) toolbar.hidden = false;
+        const usedPct = goodPct + forwardPct + roundedPct;
 
-        const count = $("historyCount");
-        if (count) {
-            count.textContent = `${filtered.length} รายการ`;
+        let normalizedGood = goodPct;
+        let normalizedForward = forwardPct;
+        let normalizedRounded = roundedPct;
+
+        if (usedPct > 100) {
+            const scale = 100 / usedPct;
+
+            normalizedGood *= scale;
+            normalizedForward *= scale;
+            normalizedRounded *= scale;
         }
-
-        if (filtered.length === 0) {
-            const list = $("historyList");
-            if (!list) return;
-
-            list.innerHTML = `
-                <div class="empty-state">
-                    <span class="empty-state-title">ไม่พบข้อมูลตามตัวกรอง</span>
-                    <span class="empty-state-desc">
-                        ลองเปลี่ยนตัวกรองระดับความเสี่ยงเพื่อดูรายการอื่น
-                    </span>
-                </div>
-            `;
-            return;
-        }
-
-        const list = $("historyList");
-        if (list) {
-            list.innerHTML = filtered.map(renderSessionCard).join("");
-        }
-    }
-
-    /* =========================
-       Summary Cards
-    ========================= */
-
-    function renderStats(sessions) {
-        let totalEffective = 0;
-        let totalGood = 0;
-        let totalAlerts = 0;
-
-        sessions.forEach((s) => {
-            totalEffective += s.effective;
-            totalGood += s.good;
-            totalAlerts += s.alertCount;
-        });
-
-        const avgGoodPct = totalEffective > 0
-            ? (totalGood / totalEffective) * 100
-            : 0;
-
-        const stats = $("historyStats");
-        if (stats) stats.hidden = false;
-
-        setText("histTotalSessions", `${sessions.length} ครั้ง`);
-        setText("histTotalTime", formatLongTime(totalEffective));
-        setText("histAvgGood", `${avgGoodPct.toFixed(0)}%`);
-        setText("histTotalAlerts", `${totalAlerts} ครั้ง`);
-    }
-
-    /* =========================
-       Overview Chart
-    ========================= */
-
-    function renderOverviewChart(sessions) {
-        const overview = $("historyOverview");
-        if (!overview) return;
-
-        let totalGood = 0;
-        let totalForward = 0;
-        let totalRounded = 0;
-
-        sessions.forEach((s) => {
-            totalGood += s.good;
-            totalForward += s.forward;
-            totalRounded += s.rounded;
-        });
-
-        const total = totalGood + totalForward + totalRounded;
-
-        if (total <= 0) {
-            overview.hidden = true;
-            return;
-        }
-
-        const goodPct = percent(totalGood, total);
-        const forwardPct = percent(totalForward, total);
-        const roundedPct = percent(totalRounded, total);
-
-        overview.hidden = false;
 
         setText("overviewGoodScore", `${goodPct.toFixed(0)}%`);
         setText("overviewGoodPct", `${goodPct.toFixed(0)}%`);
         setText("overviewForwardPct", `${forwardPct.toFixed(0)}%`);
         setText("overviewRoundedPct", `${roundedPct.toFixed(0)}%`);
 
-        setWidth("overviewGoodBar", goodPct);
-        setWidth("overviewForwardBar", forwardPct);
-        setWidth("overviewRoundedBar", roundedPct);
-
-        setText(
-            "overviewInsight",
-            buildOverviewInsight(goodPct, forwardPct, roundedPct)
-        );
+        setWidth("overviewGoodBar", normalizedGood);
+        setWidth("overviewForwardBar", normalizedForward);
+        setWidth("overviewRoundedBar", normalizedRounded);
     }
 
-    function buildOverviewInsight(goodPct, forwardPct, roundedPct) {
-        if (goodPct >= 85) {
-            return "แนวโน้มโดยรวมอยู่ในเกณฑ์ปกติ ผู้ใช้มีท่าทางปกติเป็นส่วนใหญ่ ควรรักษาพฤติกรรมนี้ต่อไป";
-        }
+    function renderCount(filteredCount, totalCount) {
+        const label = filteredCount === totalCount
+            ? `${totalCount} รายการ`
+            : `${filteredCount} จาก ${totalCount} รายการ`;
 
-        if (forwardPct >= roundedPct && forwardPct >= 20) {
-            return "แนวโน้มหลักคือค่ามุมคอไม่อยู่ในเกณฑ์ปกติ ควรปรับหน้าจอให้อยู่ระดับสายตา และดึงคางกลับเป็นระยะ";
-        }
-
-        if (roundedPct > forwardPct && roundedPct >= 20) {
-            return "แนวโน้มหลักคือค่ามุมไหล่ไม่อยู่ในเกณฑ์ปกติ ควรเปิดอก ดึงหัวไหล่กลับ และจัดตำแหน่งไหล่ให้เหมาะสม";
-        }
-
-        return "พบช่วงเวลาที่ค่ามุมไม่อยู่ในเกณฑ์ปกติเล็กน้อย ควรพักเป็นระยะและรักษาท่านั่งให้อยู่ในเกณฑ์ปกติ";
+        setText("historyCount", label);
     }
 
-    /* =========================
-       Trend Chart
-    ========================= */
-
-    function renderTrendLineChart(sessions) {
-        const trend = $("historyTrend");
-        const chart = $("trendChart");
-
-        if (!trend || !chart) return;
-
-        const pointsData = [...sessions]
-            .sort((a, b) => getTimeValue(a.startTime) - getTimeValue(b.startTime))
-            .slice(-10)
-            .map((session, index) => {
-                const total = Math.max(
-                    session.good + session.forward + session.rounded,
-                    session.effective,
-                    1
-                );
-
-                return {
-                    index,
-                    date: session.startTime,
-                    goodPct: percent(session.good, total),
-                };
-            });
-
-        if (pointsData.length < 2) {
-            trend.hidden = true;
-            return;
-        }
-
-        trend.hidden = false;
-
-        const latest = pointsData[pointsData.length - 1];
-
-        setText("trendLatestScore", `${latest.goodPct.toFixed(0)}%`);
-        setText("trendNote", buildTrendInsight(pointsData));
-
-        chart.innerHTML = buildTrendSvg(pointsData);
-    }
-
-    function buildTrendSvg(pointsData) {
-        const width = 720;
-        const height = 260;
-
-        const padding = {
-            top: 24,
-            right: 26,
-            bottom: 42,
-            left: 46,
-        };
-
-        const chartWidth = width - padding.left - padding.right;
-        const chartHeight = height - padding.top - padding.bottom;
-
-        const xStep = pointsData.length > 1
-            ? chartWidth / (pointsData.length - 1)
-            : chartWidth;
-
-        const getX = (index) => padding.left + index * xStep;
-
-        const getY = (value) => {
-            const safeValue = clamp(value, 0, 100);
-            return padding.top + chartHeight - (safeValue / 100) * chartHeight;
-        };
-
-        const points = pointsData.map((item, index) => {
-            return {
-                x: getX(index),
-                y: getY(item.goodPct),
-                value: item.goodPct,
-                label: formatShortDate(item.date),
-            };
-        });
-
-        const linePath = points
-            .map((p, index) => `${index === 0 ? "M" : "L"} ${p.x} ${p.y}`)
-            .join(" ");
-
-        const areaPath = `
-            ${linePath}
-            L ${points[points.length - 1].x} ${padding.top + chartHeight}
-            L ${points[0].x} ${padding.top + chartHeight}
-            Z
-        `;
-
-        const gridLines = [0, 25, 50, 75, 100].map((value) => {
-            const y = getY(value);
-
-            return `
-                <line x1="${padding.left}" y1="${y}" x2="${width - padding.right}" y2="${y}"
-                    stroke="rgba(0,0,0,0.08)" stroke-width="1" />
-                <text x="12" y="${y + 4}" font-size="11" fill="#9a9a9a">${value}%</text>
-            `;
-        }).join("");
-
-        const xLabels = points.map((p, index) => {
-            if (points.length > 6 && index % 2 !== 0 && index !== points.length - 1) {
-                return "";
-            }
-
-            return `
-                <text x="${p.x}" y="${height - 14}" text-anchor="middle"
-                    font-size="11" fill="#9a9a9a">${p.label}</text>
-            `;
-        }).join("");
-
-        const circles = points.map((p) => {
-            return `
-                <circle cx="${p.x}" cy="${p.y}" r="5"
-                    fill="var(--accent)" stroke="#ffffff" stroke-width="2">
-                    <title>${p.value.toFixed(0)}%</title>
-                </circle>
-                <text x="${p.x}" y="${p.y - 12}" text-anchor="middle"
-                    font-size="11" font-weight="700" fill="var(--fg)">
-                    ${p.value.toFixed(0)}%
-                </text>
-            `;
-        }).join("");
-
-        return `
-            ${gridLines}
-
-            <path d="${areaPath}"
-                fill="var(--accent-bg)"
-                opacity="0.85"></path>
-
-            <path d="${linePath}"
-                fill="none"
-                stroke="var(--accent)"
-                stroke-width="3"
-                stroke-linecap="round"
-                stroke-linejoin="round"></path>
-
-            ${circles}
-            ${xLabels}
-        `;
-    }
-
-    function buildTrendInsight(pointsData) {
-        const first = pointsData[0].goodPct;
-        const last = pointsData[pointsData.length - 1].goodPct;
-        const diff = last - first;
-
-        if (diff >= 10) {
-            return "แนวโน้มท่าทางปกติเพิ่มขึ้นอย่างชัดเจน ผู้ใช้ควรรักษาพฤติกรรมนี้ต่อไป";
-        }
-
-        if (diff >= 3) {
-            return "แนวโน้มท่าทางปกติดีขึ้นเล็กน้อย แสดงว่าผู้ใช้เริ่มปรับพฤติกรรมการนั่งได้ดีขึ้น";
-        }
-
-        if (diff <= -10) {
-            return "แนวโน้มท่าทางปกติลดลง ควรตรวจสอบตำแหน่งหน้าจอ เก้าอี้ และพฤติกรรมการนั่งระหว่างใช้งาน";
-        }
-
-        if (diff <= -3) {
-            return "แนวโน้มท่าทางปกติลดลงเล็กน้อย ควรหลีกเลี่ยงการนั่งต่อเนื่องนานเกินไปและพักเป็นระยะ";
-        }
-
-        return "แนวโน้มท่าทางค่อนข้างคงที่ ควรรักษาท่านั่งให้อยู่ในเกณฑ์ปกติและพักสายตาเป็นระยะ";
-    }
-
-    /* =========================
-       Filter / Sort
-    ========================= */
-
-    function applyFilterAndSort(sessions) {
-        const riskValue = $("riskFilter")?.value || "all";
-        const sortValue = $("sortMode")?.value || "latest";
-
-        let result = [...sessions];
-
-        if (riskValue !== "all") {
-            result = result.filter((s) => s.riskLevel === riskValue);
-        }
-
-        const riskScore = {
-            high: 3,
-            medium: 2,
-            low: 1,
-        };
-
-        result.sort((a, b) => {
-            if (sortValue === "risk") {
-                return (riskScore[b.riskLevel] || 0) - (riskScore[a.riskLevel] || 0);
-            }
-
-            if (sortValue === "alerts") {
-                return b.alertCount - a.alertCount;
-            }
-
-            return getTimeValue(b.startTime) - getTimeValue(a.startTime);
-        });
-
-        return result;
-    }
-
-    /* =========================
-       Session Card
-    ========================= */
-
-    function renderSessionCard(session) {
-        const dateLabel = formatDate(session.startTime);
-        const durationLabel = formatTime(session.effective || session.actualDuration);
-        const riskLabel = getRiskLabel(session.riskLevel);
-
-        const totalForPercent = Math.max(
-            session.good + session.forward + session.rounded,
-            session.effective,
-            1
-        );
-
-        const goodPct = percent(session.good, totalForPercent);
-        const forwardPct = percent(session.forward, totalForPercent);
-        const roundedPct = percent(session.rounded, totalForPercent);
-
-        const mainIssue = getMainIssue({
-            goodPct,
-            forwardPct,
-            roundedPct,
-            alertCount: session.alertCount,
-            forwardAlertCount: session.forwardAlertCount,
-            roundedAlertCount: session.roundedAlertCount,
-        });
-
-        return `
-            <article class="history-card">
-                <div class="hcard-top">
-                    <div class="hcard-date">
-                        <span class="hcard-date-main">${dateLabel.main}</span>
-                        <span class="hcard-date-sub">${dateLabel.sub}</span>
-                    </div>
-
-                    <span class="history-risk-badge risk-${session.riskLevel}">
-                        ${riskLabel}
-                    </span>
-                </div>
-
-                <div class="hcard-summary">
-                    <div class="hmini">
-                        <span class="hmini-label">เวลานั่งจริง</span>
-                        <span class="hmini-value">${durationLabel}</span>
-                    </div>
-
-                    <div class="hmini">
-                        <span class="hmini-label">ท่าทางปกติ</span>
-                        <span class="hmini-value">${goodPct.toFixed(0)}%</span>
-                    </div>
-
-                    <div class="hmini">
-                        <span class="hmini-label">แจ้งเตือนรวม</span>
-                        <span class="hmini-value">${session.alertCount} ครั้ง</span>
-                    </div>
-                </div>
-
-                <div class="hcard-bar" aria-label="สัดส่วนท่าทาง">
-                    <div class="hcard-bar-good" style="width:${clamp(goodPct, 0, 100)}%"></div>
-                    <div class="hcard-bar-forward" style="width:${clamp(forwardPct, 0, 100)}%"></div>
-                    <div class="hcard-bar-rounded" style="width:${clamp(roundedPct, 0, 100)}%"></div>
-                </div>
-
-                <div class="hcard-breakdown">
-                    <span>
-                        <i class="history-dot dot-good"></i>
-                        ท่าทางปกติ ${goodPct.toFixed(0)}%
-                    </span>
-
-                    <span>
-                        <i class="history-dot dot-forward"></i>
-                        คอยื่น ${forwardPct.toFixed(0)}%
-                        · ${session.forwardAlertCount} ครั้ง
-                    </span>
-
-                    <span>
-                        <i class="history-dot dot-rounded"></i>
-                        ไหล่ห่อ ${roundedPct.toFixed(0)}%
-                        · ${session.roundedAlertCount} ครั้ง
-                    </span>
-                </div>
-
-                <div class="hcard-insight">
-                    <strong>${mainIssue.title}</strong>
-                    <span>${mainIssue.desc}</span>
-                </div>
-            </article>
-        `;
-    }
-
-    function getMainIssue({
-        goodPct,
-        forwardPct,
-        roundedPct,
-        alertCount,
-        forwardAlertCount,
-        roundedAlertCount,
-    }) {
-        if (goodPct >= 85 && alertCount <= 1) {
-            return {
-                title: "แนวโน้มโดยรวมอยู่ในเกณฑ์ปกติ",
-                desc: "ผู้ใช้มีท่าทางปกติเป็นส่วนใหญ่ ควรรักษาระดับสายตาและท่านั่งให้คงที่",
-            };
-        }
-
-        if (forwardAlertCount > roundedAlertCount && forwardAlertCount > 0) {
-            return {
-                title: "ประเด็นหลัก: คอยื่น",
-                desc: `มีการแจ้งเตือนคอยื่น ${forwardAlertCount} ครั้ง ควรปรับหน้าจอให้อยู่ใกล้ระดับสายตาและดึงคางกลับเป็นระยะ`,
-            };
-        }
-
-        if (roundedAlertCount > forwardAlertCount && roundedAlertCount > 0) {
-            return {
-                title: "ประเด็นหลัก: ไหล่ห่อ",
-                desc: `มีการแจ้งเตือนไหล่ห่อ ${roundedAlertCount} ครั้ง ควรเปิดอก ดึงหัวไหล่กลับ และผ่อนคลายกล้ามเนื้อไหล่เป็นระยะ`,
-            };
-        }
-
-        if (forwardPct >= roundedPct && forwardPct >= 15) {
-            return {
-                title: "ประเด็นหลัก: คอยื่น",
-                desc: "ค่ามุมคอไม่อยู่ในเกณฑ์ปกติเป็นหลัก ควรปรับหน้าจอให้อยู่ระดับสายตา",
-            };
-        }
-
-        if (roundedPct > forwardPct && roundedPct >= 15) {
-            return {
-                title: "ประเด็นหลัก: ไหล่ห่อ",
-                desc: "ค่ามุมไหล่ไม่อยู่ในเกณฑ์ปกติเป็นหลัก ควรเปิดอกและจัดตำแหน่งไหล่ให้เหมาะสม",
-            };
-        }
-
-        if (alertCount >= 5) {
-            return {
-                title: "มีการแจ้งเตือนค่อนข้างบ่อย",
-                desc: "ควรลดระยะเวลานั่งต่อเนื่อง และเพิ่มช่วงพักสั้น ๆ ระหว่างใช้งาน",
-            };
-        }
-
-        return {
-            title: "พบค่ามุมไม่อยู่ในเกณฑ์ปกติเล็กน้อย",
-            desc: "ยังไม่รุนแรงมาก แต่ควรรักษาท่านั่งให้อยู่ในเกณฑ์ปกติและพักสายตาเป็นระยะ",
-        };
-    }
-
-    /* =========================
-       Loading / Empty / Error
-    ========================= */
-
-    function renderLoading() {
-        hideSummarySections();
-
+    function renderSessionList(sessions) {
         const list = $("historyList");
 
         if (!list) {
             return;
         }
 
-        list.innerHTML = `
-            <div class="history-loading">
-                กำลังโหลดประวัติการใช้งาน...
-            </div>
-        `;
-    }
+        list.innerHTML = "";
 
-    function renderEmptyState() {
-        hideSummarySections();
-
-        const list = $("historyList");
-        if (!list) return;
-
-        list.innerHTML = `
-            <div class="empty-state">
-                <span class="empty-state-title">ยังไม่มีประวัติการใช้งาน</span>
-                <span class="empty-state-desc">
-                    เริ่มรอบการใช้งานครั้งแรก เพื่อให้ระบบบันทึกผลการตรวจจับท่าทางและแสดงแนวโน้มย้อนหลัง
-                </span>
-                <a href="setup.html" class="btn-primary" data-start-new-session="true">เริ่มใช้งาน</a>
-            </div>
-        `;
-    }
-
-    function renderError(title = "โหลดประวัติไม่สำเร็จ", description = "โปรดตรวจสอบว่า backend เปิดอยู่ และ endpoint ประวัติการใช้งานทำงานถูกต้อง") {
-        hideSummarySections();
-
-        const list = $("historyList");
-        if (!list) return;
-
-        list.innerHTML = `
-            <div class="empty-state">
-                <span class="empty-state-title">${escapeHtml(title)}</span>
-                <span class="empty-state-desc">
-                    ${escapeHtml(description)}
-                </span>
-                <button type="button" class="btn-primary" id="retryHistoryBtn">
-                    ลองโหลดอีกครั้ง
-                </button>
-            </div>
-        `;
-
-        const retryBtn = $("retryHistoryBtn");
-
-        if (retryBtn) {
-            retryBtn.addEventListener("click", () => {
-                loadHistory();
-            });
+        if (!allSessions.length) {
+            list.innerHTML = buildEmptyState(
+                "ยังไม่มีประวัติการใช้งาน",
+                "เริ่มตรวจท่านั่งครั้งแรกเพื่อให้ระบบบันทึกประวัติและวิเคราะห์พฤติกรรมย้อนหลังของคุณ",
+                "เริ่มตรวจใหม่"
+            );
+            return;
         }
+
+        if (!sessions.length) {
+            list.innerHTML = buildEmptyState(
+                "ไม่พบรายการตามตัวกรอง",
+                "ลองเปลี่ยนช่วงเวลา หรือล้างตัวกรองเพื่อดู session ทั้งหมด",
+                "ดูทั้งหมด",
+                "reset-filter"
+            );
+
+            const resetBtn = $("historyEmptyAction");
+
+            if (resetBtn) {
+                resetBtn.addEventListener("click", (event) => {
+                    event.preventDefault();
+
+                    activeFilter = "all";
+
+                    document.querySelectorAll("[data-range-filter]").forEach((btn) => {
+                        btn.classList.toggle(
+                            "is-active",
+                            btn.dataset.rangeFilter === "all"
+                        );
+                    });
+
+                    renderPage();
+                });
+            }
+
+            return;
+        }
+
+        const fragment = document.createDocumentFragment();
+
+        sessions.forEach((session) => {
+            fragment.appendChild(createSessionCard(session));
+        });
+
+        list.appendChild(fragment);
     }
 
-    function hideSummarySections() {
-        const stats = $("historyStats");
-        const overview = $("historyOverview");
-        const trend = $("historyTrend");
-        const toolbar = $("historyToolbar");
+    function createSessionCard(session) {
+        const card = document.createElement("article");
+        const risk = normalizeRisk(session);
 
-        if (stats) stats.hidden = true;
-        if (overview) overview.hidden = true;
-        if (trend) trend.hidden = true;
-        if (toolbar) toolbar.hidden = true;
+        card.className = `history-session-card ${session.isIncomplete ? "is-incomplete" : ""}`;
+
+        const startDate = formatDateTime(session.startedAt);
+        const dateOnly = formatDateOnly(session.startedAt);
+        const duration = formatDuration(session.displayDurationSeconds);
+
+        const scoreText = session.isIncomplete
+            ? "—"
+            : `${session.goodRatio.toFixed(0)}%`;
+
+        const scoreLabel = session.isIncomplete
+            ? "ข้อมูลไม่พอ"
+            : "Good posture";
+
+        const metaText = session.isIncomplete
+            ? `ระยะเวลาสั้นเกินไป · ${dateOnly}`
+            : `ระยะเวลา ${duration} · แจ้งเตือน ${session.alertCount} ครั้ง · ${dateOnly}`;
+
+        card.innerHTML = `
+            <div class="history-session-main">
+                <div class="history-session-top">
+                    <strong class="history-session-date">${escapeHtml(startDate)}</strong>
+                    <span class="history-risk-badge ${risk.className}">
+                        ${escapeHtml(risk.label)}
+                    </span>
+                </div>
+
+                <div class="history-session-meta">
+                    <span>${escapeHtml(metaText)}</span>
+                </div>
+
+                <div class="history-session-compact">
+                    <span>
+                        <small>คอยื่น</small>
+                        <strong>${escapeHtml(formatDuration(session.forwardSeconds))}</strong>
+                    </span>
+
+                    <span>
+                        <small>ไหล่ห่อ</small>
+                        <strong>${escapeHtml(formatDuration(session.roundedSeconds))}</strong>
+                    </span>
+
+                    <span>
+                        <small>แจ้งเตือน</small>
+                        <strong>${session.alertCount} ครั้ง</strong>
+                    </span>
+                </div>
+            </div>
+
+            <aside class="history-session-side ${session.isIncomplete ? "is-empty" : ""}" aria-label="คะแนนท่านั่งดี">
+                <strong class="history-good-score">${escapeHtml(scoreText)}</strong>
+                <span class="history-good-label">${escapeHtml(scoreLabel)}</span>
+            </aside>
+        `;
+
+        return card;
+    }
+
+    function buildEmptyState(title, message, actionText, actionMode = "start") {
+        const href = actionMode === "start" ? "setup.html" : "#";
+
+        return `
+            <article class="history-empty-card">
+                <div class="history-empty-icon">📊</div>
+                <h3>${escapeHtml(title)}</h3>
+                <p>${escapeHtml(message)}</p>
+                <a href="${href}" class="history-primary-btn" id="historyEmptyAction">
+                    ${escapeHtml(actionText)}
+                </a>
+            </article>
+        `;
     }
 
     /* =========================
-       Helpers
+       Normalize Session
     ========================= */
 
-    function normalizeRisk(value, good, forward, rounded) {
-        if (value === "high" || value === "medium" || value === "low") {
-            return value;
+    function normalizeSession(raw) {
+        if (!raw || typeof raw !== "object") {
+            return null;
         }
 
-        const total = good + forward + rounded;
+        const actualSeconds = firstNumber(raw, [
+            "actual_duration_seconds",
+            "actualDurationSeconds",
+            "duration_seconds",
+            "duration",
+            "total_duration_seconds",
+        ]);
 
-        if (total <= 0) {
-            return "low";
+        const effectiveSeconds = firstNumber(raw, [
+            "effective_seated_seconds",
+            "effectiveSeatedSeconds",
+            "seated_seconds",
+            "total_seated_seconds",
+            "actual_duration_seconds",
+            "duration_seconds",
+        ]);
+
+        const goodSeconds = firstNumber(raw, [
+            "good_posture_seconds",
+            "goodPostureSeconds",
+            "good_seconds",
+        ]);
+
+        const badSeconds = firstNumber(raw, [
+            "bad_posture_seconds",
+            "badPostureSeconds",
+            "bad_seconds",
+        ]);
+
+        const forwardSeconds = firstNumber(raw, [
+            "forward_head_seconds",
+            "forwardHeadSeconds",
+            "forward_head_duration",
+            "forward_duration_seconds",
+        ]);
+
+        const roundedSeconds = firstNumber(raw, [
+            "rounded_shoulder_seconds",
+            "roundedShoulderSeconds",
+            "rounded_shoulder_duration",
+            "rounded_duration_seconds",
+        ]);
+
+        const alertCount = firstNumber(raw, [
+            "alert_count",
+            "alertCount",
+            "alerts",
+            "total_alerts",
+        ]);
+
+        const forwardAlerts = firstNumber(raw, [
+            "forward_head_alert_count",
+            "forwardHeadAlertCount",
+            "forward_alert_count",
+        ]);
+
+        const roundedAlerts = firstNumber(raw, [
+            "rounded_shoulder_alert_count",
+            "roundedShoulderAlertCount",
+            "rounded_alert_count",
+        ]);
+
+        const startedAt = firstValue(raw, [
+            "started_at",
+            "start_time",
+            "created_at",
+            "date",
+            "session_start",
+        ]);
+
+        const endedAt = firstValue(raw, [
+            "ended_at",
+            "end_time",
+            "finished_at",
+            "session_end",
+        ]);
+
+        const riskLevel = String(firstValue(raw, [
+            "risk_level",
+            "riskLevel",
+            "risk",
+        ]) || "").toLowerCase();
+
+        const safeActual = Math.max(actualSeconds, 0);
+        const safeEffective = Math.max(effectiveSeconds, 0);
+        const displayDurationSeconds = Math.max(safeEffective, safeActual);
+
+        const isIncomplete = displayDurationSeconds < MIN_COMPLETE_SESSION_SECONDS;
+
+        const safeGood = Math.max(goodSeconds, 0);
+        const safeBad = Math.max(badSeconds, 0);
+
+        let goodRatio = 0;
+
+        if (!isIncomplete && safeEffective > 0) {
+            goodRatio = (safeGood / safeEffective) * 100;
         }
 
-        const riskRatio = (forward + rounded) / total;
+        const rawBadRatio = firstNumber(raw, [
+            "bad_posture_ratio",
+            "badPostureRatio",
+            "bad_ratio",
+        ], NaN);
 
-        if (riskRatio >= 0.5) return "high";
-        if (riskRatio >= 0.2) return "medium";
-        return "low";
-    }
+        const badRatio = Number.isFinite(rawBadRatio)
+            ? normalizeRatio(rawBadRatio)
+            : !isIncomplete && safeEffective > 0
+                ? clamp((safeBad / safeEffective) * 100, 0, 100)
+                : 0;
 
-    function getRiskLabel(riskLevel) {
-        const map = {
-            low: "ต่ำ",
-            medium: "ปานกลาง",
-            high: "สูง",
+        if (!isIncomplete && (!Number.isFinite(goodRatio) || goodRatio <= 0)) {
+            goodRatio = clamp(100 - badRatio, 0, 100);
+        }
+
+        const safeForwardAlerts = Math.max(forwardAlerts, 0);
+        const safeRoundedAlerts = Math.max(roundedAlerts, 0);
+        const safeAlertCount = Math.max(alertCount, safeForwardAlerts + safeRoundedAlerts, 0);
+
+        return {
+            id: firstValue(raw, ["id", "session_id", "sessionId"]),
+            startedAt: normalizeDate(startedAt),
+            endedAt: normalizeDate(endedAt),
+            actualSeconds: safeActual,
+            effectiveSeconds: safeEffective,
+            displayDurationSeconds,
+            goodSeconds: isIncomplete ? 0 : safeGood,
+            badSeconds: isIncomplete ? 0 : safeBad,
+            forwardSeconds: Math.max(forwardSeconds, 0),
+            roundedSeconds: Math.max(roundedSeconds, 0),
+            alertCount: safeAlertCount,
+            forwardAlerts: safeForwardAlerts,
+            roundedAlerts: safeRoundedAlerts,
+            goodRatio: isIncomplete ? 0 : clamp(goodRatio, 0, 100),
+            badRatio: isIncomplete ? 0 : clamp(badRatio, 0, 100),
+            riskLevel,
+            isIncomplete,
+            raw,
         };
-
-        return map[riskLevel] || "ต่ำ";
     }
 
-    function getNumber(...values) {
-        for (const value of values) {
-            const num = Number(value);
+    function firstNumber(obj, keys, fallback = 0) {
+        for (const key of keys) {
+            if (obj[key] !== undefined && obj[key] !== null && obj[key] !== "") {
+                const value = Number(obj[key]);
 
-            if (!Number.isNaN(num) && Number.isFinite(num)) {
-                return num;
+                if (Number.isFinite(value)) {
+                    return value;
+                }
             }
         }
 
-        return 0;
+        return fallback;
     }
 
-    function percent(value, total) {
-        if (!total || total <= 0) return 0;
-        return (Number(value) / Number(total)) * 100;
+    function firstValue(obj, keys) {
+        for (const key of keys) {
+            if (obj[key] !== undefined && obj[key] !== null && obj[key] !== "") {
+                return obj[key];
+            }
+        }
+
+        return null;
     }
 
-    function clamp(value, min, max) {
-        return Math.max(min, Math.min(max, value));
+    function normalizeRatio(value) {
+        const n = Number(value);
+
+        if (!Number.isFinite(n)) {
+            return 0;
+        }
+
+        if (n <= 1) {
+            return n * 100;
+        }
+
+        return n;
     }
 
-    function setWidth(id, value) {
-        const el = $(id);
-        if (!el) return;
+    function normalizeDate(value) {
+        if (!value) {
+            return null;
+        }
 
-        const safeValue = clamp(value, 0, 100);
-        el.style.width = `${safeValue}%`;
+        if (typeof value === "number") {
+            const date = new Date(value);
+
+            if (!Number.isNaN(date.getTime())) {
+                return date;
+            }
+        }
+
+        const date = new Date(String(value).replace(" ", "T"));
+
+        if (!Number.isNaN(date.getTime())) {
+            return date;
+        }
+
+        return null;
     }
 
-    function setText(id, value) {
-        const el = $(id);
-        if (!el) return;
+    /* =========================
+       Filter / Sort
+    ========================= */
 
-        el.textContent = value;
+    function filterSessions(sessions, filter) {
+        const now = new Date();
+
+        if (filter === "all") {
+            return [...sessions];
+        }
+
+        if (filter === "high") {
+            return sessions.filter((session) => {
+                const risk = normalizeRisk(session);
+                return risk.level === "high";
+            });
+        }
+
+        const days = filter === "7d" ? 7 : filter === "30d" ? 30 : null;
+
+        if (!days) {
+            return [...sessions];
+        }
+
+        const start = new Date(now);
+        start.setDate(start.getDate() - days);
+
+        return sessions.filter((session) => {
+            if (!session.startedAt) {
+                return false;
+            }
+
+            return session.startedAt >= start && session.startedAt <= now;
+        });
     }
 
-    function formatDate(dateString) {
-        if (!dateString) {
+    function sortSessions(sessions, mode) {
+        const result = [...sessions];
+
+        result.sort((a, b) => {
+            if (a.isIncomplete && !b.isIncomplete) return 1;
+            if (!a.isIncomplete && b.isIncomplete) return -1;
+
+            if (mode === "worst") {
+                return b.badRatio - a.badRatio;
+            }
+
+            if (mode === "alerts") {
+                return b.alertCount - a.alertCount;
+            }
+
+            if (mode === "duration") {
+                return b.displayDurationSeconds - a.displayDurationSeconds;
+            }
+
+            const timeA = a.startedAt ? a.startedAt.getTime() : 0;
+            const timeB = b.startedAt ? b.startedAt.getTime() : 0;
+
+            return timeB - timeA;
+        });
+
+        return result;
+    }
+
+    /* =========================
+       Calculate
+    ========================= */
+
+    function calculateTotals(sessions) {
+        const completed = sessions.filter((session) => !session.isIncomplete);
+
+        const totals = {
+            totalSessions: sessions.length,
+            completedSessions: completed.length,
+            incompleteSessions: sessions.length - completed.length,
+            totalEffectiveSeconds: 0,
+            totalActualSeconds: 0,
+            goodSeconds: 0,
+            badSeconds: 0,
+            forwardSeconds: 0,
+            roundedSeconds: 0,
+            totalAlerts: 0,
+            forwardAlerts: 0,
+            roundedAlerts: 0,
+            goodRatio: 0,
+            badRatio: 0,
+        };
+
+        completed.forEach((session) => {
+            totals.totalEffectiveSeconds += session.effectiveSeconds;
+            totals.totalActualSeconds += session.actualSeconds;
+            totals.goodSeconds += session.goodSeconds;
+            totals.badSeconds += session.badSeconds;
+            totals.forwardSeconds += session.forwardSeconds;
+            totals.roundedSeconds += session.roundedSeconds;
+            totals.totalAlerts += session.alertCount;
+            totals.forwardAlerts += session.forwardAlerts;
+            totals.roundedAlerts += session.roundedAlerts;
+        });
+
+        if (totals.totalEffectiveSeconds > 0) {
+            totals.goodRatio = clamp(
+                (totals.goodSeconds / totals.totalEffectiveSeconds) * 100,
+                0,
+                100
+            );
+
+            totals.badRatio = clamp(100 - totals.goodRatio, 0, 100);
+        }
+
+        return totals;
+    }
+
+    function buildInsightText(totals) {
+        if (!totals.totalSessions) {
+            return "ยังไม่มีข้อมูลประวัติ เริ่มตรวจท่านั่งครั้งแรกเพื่อให้ระบบวิเคราะห์แนวโน้มของคุณ";
+        }
+
+        if (!totals.completedSessions) {
+            return "ยังไม่มี session ที่มีข้อมูลเพียงพอสำหรับวิเคราะห์แนวโน้ม ลองใช้งานให้นานกว่า 5 วินาทีเพื่อให้ระบบสรุปผลได้แม่นขึ้น";
+        }
+
+        if (totals.forwardSeconds <= 0 && totals.roundedSeconds <= 0) {
+            return "โดยรวมยังไม่พบเวลาสะสมของคอยื่นหรือไหล่ห่อมากนัก รักษาท่านั่งให้สม่ำเสมอต่อไป";
+        }
+
+        if (totals.forwardSeconds > totals.roundedSeconds) {
+            return `แนวโน้มหลักคือคอยื่น สะสม ${formatDuration(totals.forwardSeconds)} มากกว่าไหล่ห่อ แนะนำให้ปรับระดับจอและดึงศีรษะกลับมาอยู่แนวเดียวกับลำตัว`;
+        }
+
+        if (totals.roundedSeconds > totals.forwardSeconds) {
+            return `แนวโน้มหลักคือไหล่ห่อ สะสม ${formatDuration(totals.roundedSeconds)} มากกว่าคอยื่น แนะนำให้เปิดอก ผ่อนคลายไหล่ และปรับตำแหน่งแขนบนโต๊ะ`;
+        }
+
+        return "คอยื่นและไหล่ห่อมีสัดส่วนใกล้เคียงกัน แนะนำให้จัดทั้งระดับจอ ระยะห่างเก้าอี้ และตำแหน่งไหล่ให้สมดุล";
+    }
+
+    function normalizeRisk(session) {
+        if (session.isIncomplete) {
             return {
-                main: "ไม่ทราบวันที่",
-                sub: "ไม่ทราบเวลา",
+                level: "incomplete",
+                label: "ไม่สมบูรณ์",
+                className: "is-incomplete",
             };
         }
 
-        const safeDateString = String(dateString).endsWith("Z")
-            ? dateString
-            : `${dateString}Z`;
+        const alertCount = Number(session.alertCount) || 0;
+        const badRatio = Number(session.badRatio) || 0;
+        const forwardSeconds = Number(session.forwardSeconds) || 0;
+        const roundedSeconds = Number(session.roundedSeconds) || 0;
+        const badSeconds = forwardSeconds + roundedSeconds;
 
-        const date = new Date(safeDateString);
+        /*
+          ใช้ข้อมูลจริงใน session เป็นหลัก
+          ไม่เชื่อ risk_level จาก backend ก่อน
+          เพราะบาง session อาจมี alert แต่ backend ยังส่ง low มา
+        */
 
-        if (Number.isNaN(date.getTime())) {
+        if (alertCount >= 3 || badRatio >= 40 || badSeconds >= 600) {
             return {
-                main: "ไม่ทราบวันที่",
-                sub: "ไม่ทราบเวลา",
+                level: "high",
+                label: "เสี่ยงสูง",
+                className: "is-high",
+            };
+        }
+
+        if (alertCount >= 1 || badRatio >= 15 || badSeconds >= 120) {
+            return {
+                level: "medium",
+                label: "เสี่ยงปานกลาง",
+                className: "is-medium",
             };
         }
 
         return {
-            main: date.toLocaleDateString("th-TH", {
-                year: "numeric",
-                month: "short",
-                day: "numeric",
-            }),
-            sub: date.toLocaleTimeString("th-TH", {
-                hour: "2-digit",
-                minute: "2-digit",
-            }),
+            level: "low",
+            label: "เสี่ยงต่ำ",
+            className: "is-low",
         };
     }
 
-    function formatShortDate(dateString) {
-        if (!dateString) return "-";
+    /* =========================
+       State
+    ========================= */
 
-        const safeDateString = String(dateString).endsWith("Z")
-            ? dateString
-            : `${dateString}Z`;
+    function showState(title, message, loading = true) {
+        const state = $("historyState");
+        const icon = document.querySelector(".history-loading-icon");
 
-        const date = new Date(safeDateString);
-
-        if (Number.isNaN(date.getTime())) {
-            return "-";
+        if (!state) {
+            return;
         }
 
-        return date.toLocaleDateString("th-TH", {
-            day: "numeric",
-            month: "short",
-        });
-    }
+        state.hidden = false;
 
-    function getTimeValue(dateString) {
-        if (!dateString) return 0;
+        const content = $("historyContent");
 
-        const safeDateString = String(dateString).endsWith("Z")
-            ? dateString
-            : `${dateString}Z`;
-
-        const date = new Date(safeDateString);
-        return Number.isNaN(date.getTime()) ? 0 : date.getTime();
-    }
-
-    function getDurationFromDates(start, end) {
-        if (!start || !end) return 0;
-
-        const startTime = getTimeValue(start);
-        const endTime = getTimeValue(end);
-
-        if (!startTime || !endTime || endTime <= startTime) {
-            return 0;
+        if (content) {
+            content.hidden = true;
         }
 
-        return (endTime - startTime) / 1000;
+        setText("historyStateTitle", title);
+        setText("historyStateMessage", message);
+
+        if (icon) {
+            icon.style.animation = loading ? "" : "none";
+            icon.style.borderTopColor = loading ? "" : "var(--bad, #c93f43)";
+        }
     }
 
-    function formatTime(totalSeconds) {
-        const s = Math.floor(Number(totalSeconds) || 0);
-        const h = Math.floor(s / 3600);
-        const m = Math.floor((s % 3600) / 60);
-        const sec = s % 60;
+    function hideState() {
+        const state = $("historyState");
 
-        if (h > 0) {
-            return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
+        if (state) {
+            state.hidden = true;
         }
-
-        return `${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
     }
 
-    function formatLongTime(totalSeconds) {
-        const s = Math.floor(Number(totalSeconds) || 0);
-        const h = Math.floor(s / 3600);
-        const m = Math.floor((s % 3600) / 60);
+    /* =========================
+       Format / Utilities
+    ========================= */
 
-        if (h > 0) {
-            return `${h} ชม. ${m} นาที`;
+    function formatDuration(totalSeconds) {
+        const seconds = Math.max(0, Math.floor(Number(totalSeconds) || 0));
+
+        const hours = Math.floor(seconds / 3600);
+        const minutes = Math.floor((seconds % 3600) / 60);
+        const sec = seconds % 60;
+
+        if (hours > 0) {
+            if (minutes === 0) {
+                return `${hours} ชม.`;
+            }
+
+            return `${hours} ชม. ${minutes} นาที`;
         }
 
-        return `${m} นาที`;
+        if (minutes > 0) {
+            return `${minutes} นาที`;
+        }
+
+        return `${sec} วินาที`;
+    }
+
+    function formatDateTime(date) {
+        if (!date) {
+            return "ไม่ทราบเวลา";
+        }
+
+        try {
+            return new Intl.DateTimeFormat("th-TH", {
+                dateStyle: "medium",
+                timeStyle: "short",
+            }).format(date);
+        } catch (_) {
+            return date.toLocaleString();
+        }
+    }
+
+    function formatDateOnly(date) {
+        if (!date) {
+            return "ไม่ทราบวันที่";
+        }
+
+        try {
+            return new Intl.DateTimeFormat("th-TH", {
+                weekday: "short",
+                day: "2-digit",
+                month: "short",
+                year: "numeric",
+            }).format(date);
+        } catch (_) {
+            return date.toLocaleDateString();
+        }
+    }
+
+    function getCurrentUserSafe() {
+        if (window.utils && typeof utils.getCurrentUser === "function") {
+            return utils.getCurrentUser();
+        }
+
+        try {
+            return JSON.parse(localStorage.getItem("currentUser") || "null");
+        } catch (_) {
+            return null;
+        }
+    }
+
+    function getUserId(user) {
+        if (!user) {
+            return null;
+        }
+
+        return user.id || user.user_id || user.userId || null;
+    }
+
+    function getApiBase() {
+        if (window.utils && utils.API_BASE) {
+            return utils.API_BASE;
+        }
+
+        if (window.api && api.API_BASE) {
+            return api.API_BASE;
+        }
+
+        return "http://localhost:8000";
+    }
+
+    function setText(id, value) {
+        const el = $(id);
+
+        if (!el) {
+            return;
+        }
+
+        el.textContent = String(value);
+    }
+
+    function setWidth(id, percent) {
+        const el = $(id);
+
+        if (!el) {
+            return;
+        }
+
+        el.style.width = `${clamp(percent, 0, 100)}%`;
+    }
+
+    function clamp(value, min, max) {
+        const n = Number(value);
+
+        if (!Number.isFinite(n)) {
+            return min;
+        }
+
+        return Math.max(min, Math.min(max, n));
     }
 
     function escapeHtml(value) {

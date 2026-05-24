@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ประวัติ · PostureGuard</title>
+    <title>ประวัติการใช้งาน · PostureGuard AI</title>
 
     <link rel="stylesheet" href="../css/base.css">
     <link rel="stylesheet" href="../css/layout.css">
@@ -16,114 +16,213 @@
 <body class="app-history">
     <div id="header"></div>
 
-    <main class="dashboard">
-        <section class="history-page">
+    <main class="dashboard history-dashboard">
+        <section class="history-page" aria-labelledby="historyPageTitle">
 
-            <header class="history-header">
-                <div>
-                    <h2 class="history-title">ประวัติการใช้งาน</h2>
+            <!-- =========================
+                 Hero
+            ========================== -->
+            <header class="history-hero">
+                <div class="history-hero-content">
+                    <span class="history-kicker">Posture History</span>
+
+                    <h1 class="history-title" id="historyPageTitle">
+                        ประวัติการใช้งาน
+                    </h1>
+
                     <p class="history-subtitle">
-                        ดูผลการตรวจจับท่าทางย้อนหลังจากแต่ละรอบการใช้งาน
+                        ดูภาพรวมพฤติกรรมท่านั่งย้อนหลัง วิเคราะห์แนวโน้มคอยื่นและไหล่ห่อ
+                        เพื่อปรับพฤติกรรมการนั่งให้ดีขึ้น
                     </p>
+                </div>
+
+                <div class="history-hero-actions">
+                    <a href="summary.html" class="history-secondary-btn">
+                        ดูสรุปล่าสุด
+                    </a>
+
+                    <a href="setup.html" class="history-primary-btn" id="startNewSessionBtn">
+                        เริ่มตรวจใหม่
+                    </a>
                 </div>
             </header>
 
-            <!-- Summary Cards -->
-            <div class="history-stats" id="historyStats" hidden>
-                <div class="hstat">
-                    <span class="hstat-label">จำนวนรอบทั้งหมด</span>
-                    <span class="hstat-value" id="histTotalSessions">— ครั้ง</span>
-                </div>
-
-                <div class="hstat">
-                    <span class="hstat-label">เวลานั่งจริงรวม</span>
-                    <span class="hstat-value" id="histTotalTime">—</span>
-                </div>
-
-                <div class="hstat">
-                    <span class="hstat-label">ท่าทางปกติเฉลี่ย</span>
-                    <span class="hstat-value" id="histAvgGood">—</span>
-                </div>
-
-                <div class="hstat">
-                    <span class="hstat-label">แจ้งเตือนรวม</span>
-                    <span class="hstat-value" id="histTotalAlerts">— ครั้ง</span>
-                </div>
-            </div>
-
-            <!-- Overview Chart -->
-            <div class="history-overview" id="historyOverview" hidden>
-                <div class="overview-header">
+            <!-- =========================
+                 State: Loading / Error
+            ========================== -->
+            <section class="history-state" id="historyState" aria-live="polite">
+                <div class="history-loading-card">
+                    <div class="history-loading-icon"></div>
                     <div>
-                        <h3 class="overview-title">ภาพรวมท่าทางย้อนหลัง</h3>
-                        <p class="overview-desc">
-                            สัดส่วนท่าทางปกติและค่ามุมที่ไม่อยู่ในเกณฑ์จากรอบการใช้งานทั้งหมด
+                        <strong id="historyStateTitle">กำลังโหลดประวัติ</strong>
+                        <p id="historyStateMessage">ระบบกำลังดึงข้อมูล session ย้อนหลังของคุณ</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- =========================
+                 Content
+            ========================== -->
+            <section class="history-content" id="historyContent" hidden>
+
+                <!-- Overview Cards -->
+                <div class="history-overview-grid" id="historyStats">
+                    <article class="history-stat-card">
+                        <div class="history-stat-icon">📌</div>
+                        <div>
+                            <span class="history-stat-label">จำนวนรอบทั้งหมด</span>
+                            <strong class="history-stat-value" id="histTotalSessions">—</strong>
+                            <span class="history-stat-note">sessions</span>
+                        </div>
+                    </article>
+
+                    <article class="history-stat-card">
+                        <div class="history-stat-icon">⏱</div>
+                        <div>
+                            <span class="history-stat-label">เวลานั่งรวม</span>
+                            <strong class="history-stat-value" id="histTotalTime">—</strong>
+                            <span class="history-stat-note">เวลาที่ระบบตรวจพบการนั่ง</span>
+                        </div>
+                    </article>
+
+                    <article class="history-stat-card is-good">
+                        <div class="history-stat-icon">✓</div>
+                        <div>
+                            <span class="history-stat-label">ท่านั่งดีเฉลี่ย</span>
+                            <strong class="history-stat-value" id="histAvgGood">—</strong>
+                            <span class="history-stat-note">จากเวลานั่งทั้งหมด</span>
+                        </div>
+                    </article>
+
+                    <article class="history-stat-card is-alert">
+                        <div class="history-stat-icon">!</div>
+                        <div>
+                            <span class="history-stat-label">แจ้งเตือนรวม</span>
+                            <strong class="history-stat-value" id="histTotalAlerts">—</strong>
+                            <span class="history-stat-note">ครั้ง</span>
+                        </div>
+                    </article>
+                </div>
+
+                <!-- Insight -->
+                <section class="history-insight-card" aria-labelledby="historyInsightTitle">
+                    <div class="history-insight-main">
+                        <span class="history-section-eyebrow">Insight</span>
+
+                        <h2 class="history-section-title" id="historyInsightTitle">
+                            ปัญหาหลักของคุณ
+                        </h2>
+
+                        <p class="history-insight-text" id="overviewInsight">
+                            กำลังวิเคราะห์แนวโน้ม...
                         </p>
                     </div>
 
-                    <div class="overview-score">
-                        <span class="overview-score-label">ท่าทางปกติเฉลี่ย</span>
-                        <strong id="overviewGoodScore">—%</strong>
+                    <div class="history-issue-grid">
+                        <article class="history-issue-card is-forward">
+                            <span class="history-issue-label">คอยื่นสะสม</span>
+                            <strong id="histForwardTime">—</strong>
+                            <small id="histForwardAlerts">— ครั้ง</small>
+                        </article>
+
+                        <article class="history-issue-card is-rounded">
+                            <span class="history-issue-label">ไหล่ห่อสะสม</span>
+                            <strong id="histRoundedTime">—</strong>
+                            <small id="histRoundedAlerts">— ครั้ง</small>
+                        </article>
                     </div>
-                </div>
+                </section>
 
-                <div class="overview-bar" aria-label="ภาพรวมสัดส่วนท่าทาง">
-                    <div class="overview-good" id="overviewGoodBar"></div>
-                    <div class="overview-forward" id="overviewForwardBar"></div>
-                    <div class="overview-rounded" id="overviewRoundedBar"></div>
-                </div>
+                <!-- Composition Bar -->
+                <section class="history-composition-card" aria-labelledby="compositionTitle">
+                    <div class="history-card-head">
+                        <div>
+                            <span class="history-section-eyebrow">Overview</span>
+                            <h2 class="history-section-title" id="compositionTitle">
+                                สัดส่วนท่าทางย้อนหลัง
+                            </h2>
+                        </div>
 
-                <div class="overview-legend">
-                    <span>
-                        <i class="legend-dot dot-good"></i>
-                        ท่าทางปกติ <strong id="overviewGoodPct">—%</strong>
-                    </span>
+                        <div class="history-score-pill">
+                            <span>Good posture</span>
+                            <strong id="overviewGoodScore">—%</strong>
+                        </div>
+                    </div>
 
-                    <span>
-                        <i class="legend-dot dot-forward"></i>
-                        คอยื่น <strong id="overviewForwardPct">—%</strong>
-                    </span>
+                    <div class="history-composition-bar" aria-label="สัดส่วนท่าทางย้อนหลัง">
+                        <div class="history-bar-good" id="overviewGoodBar"></div>
+                        <div class="history-bar-forward" id="overviewForwardBar"></div>
+                        <div class="history-bar-rounded" id="overviewRoundedBar"></div>
+                    </div>
 
-                    <span>
-                        <i class="legend-dot dot-rounded"></i>
-                        ไหล่ห่อ <strong id="overviewRoundedPct">—%</strong>
-                    </span>
-                </div>
+                    <div class="history-legend">
+                        <span>
+                            <i class="legend-dot dot-good"></i>
+                            ท่าทางดี <strong id="overviewGoodPct">—%</strong>
+                        </span>
 
-                <div class="overview-insight" id="overviewInsight">
-                    กำลังวิเคราะห์แนวโน้ม...
-                </div>
-            </div>
+                        <span>
+                            <i class="legend-dot dot-forward"></i>
+                            คอยื่น <strong id="overviewForwardPct">—%</strong>
+                        </span>
 
-            <!-- Toolbar -->
-            <div class="history-toolbar" id="historyToolbar" hidden>
-                <div class="history-toolbar-title">
-                    <strong>รายการรอบการใช้งาน</strong>
-                    <span id="historyCount">—</span>
-                </div>
+                        <span>
+                            <i class="legend-dot dot-rounded"></i>
+                            ไหล่ห่อ <strong id="overviewRoundedPct">—%</strong>
+                        </span>
+                    </div>
+                </section>
 
-                <div class="history-controls">
-                    <select id="riskFilter" class="history-select">
-                        <option value="all">ระดับความเสี่ยงทั้งหมด</option>
-                        <option value="low">ความเสี่ยงต่ำ</option>
-                        <option value="medium">ความเสี่ยงปานกลาง</option>
-                        <option value="high">ความเสี่ยงสูง</option>
-                    </select>
+                <!-- Toolbar -->
+                <section class="history-toolbar" aria-label="ตัวกรองประวัติ">
+                    <div class="history-toolbar-left">
+                        <div>
+                            <span class="history-section-eyebrow">Sessions</span>
+                            <h2 class="history-list-title">
+                                รายการรอบการใช้งาน
+                            </h2>
+                        </div>
 
-                    <select id="sortMode" class="history-select">
-                        <option value="latest">ล่าสุดก่อน</option>
-                        <option value="risk">ความเสี่ยงสูงสุดก่อน</option>
-                        <option value="alerts">แจ้งเตือนมากสุดก่อน</option>
-                    </select>
-                </div>
-            </div>
+                        <span class="history-count" id="historyCount">—</span>
+                    </div>
 
-            <!-- Session List -->
-            <div class="history-list" id="historyList">
-                <div class="history-loading">
-                    กำลังโหลดประวัติการใช้งาน...
-                </div>
-            </div>
+                    <div class="history-toolbar-right">
+                        <div class="history-filter-group" role="group" aria-label="ช่วงเวลา">
+                            <button class="history-filter-btn is-active" type="button" data-range-filter="all">
+                                ทั้งหมด
+                            </button>
+
+                            <button class="history-filter-btn" type="button" data-range-filter="7d">
+                                7 วัน
+                            </button>
+
+                            <button class="history-filter-btn" type="button" data-range-filter="30d">
+                                30 วัน
+                            </button>
+
+                            <button class="history-filter-btn" type="button" data-range-filter="high">
+                                เสี่ยงสูง
+                            </button>
+                        </div>
+
+                        <label class="history-sort-label" for="sortMode">
+                            เรียงตาม
+                            <select id="sortMode" class="history-select">
+                                <option value="latest">ล่าสุดก่อน</option>
+                                <option value="worst">ท่านั่งแย่ที่สุด</option>
+                                <option value="alerts">แจ้งเตือนมากที่สุด</option>
+                                <option value="duration">ใช้งานนานที่สุด</option>
+                            </select>
+                        </label>
+                    </div>
+                </section>
+
+                <!-- Session List -->
+                <section class="history-list" id="historyList" aria-live="polite">
+                    <!-- Render by history.js -->
+                </section>
+
+            </section>
 
         </section>
     </main>

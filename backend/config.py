@@ -184,11 +184,11 @@ MARKER_TEMPORAL_WEIGHT: float = 0.6
 
 # ระยะเวลาที่ต้องผิดท่าต่อเนื่องก่อนแจ้งเตือน
 # 180 วินาที = 3 นาที
-ISSUE_ALERT_DURATION: float = 180.0
+ISSUE_ALERT_DURATION: float = 10
 
 # ระยะเวลาแจ้งเตือนซ้ำ หากยังผิดท่าต่อเนื่อง
 # 180 วินาที = 3 นาที
-ISSUE_REPEAT_ALERT_INTERVAL: float = 180.0
+ISSUE_REPEAT_ALERT_INTERVAL: float = 10
 
 # ค่าเก่า เก็บไว้รองรับโค้ดเดิม
 BAD_POSTURE_DURATION_MILD: float = ISSUE_ALERT_DURATION
