@@ -12,18 +12,21 @@
 # - นับจำนวนแจ้งเตือนแยกประเภท: คอยื่น / ไหล่ห่อ
 # - ไม่มี warning แล้ว
 # - ส่ง LINE notification เฉพาะจังหวะ alert จริง ไม่ส่งทุก frame
+# - ส่ง LINE ตาม user_id ของ session ปัจจุบัน เพื่อรองรับ multi-user
 
-import time
+from __future__ import annotations
+
 import threading
-from typing import Optional, Dict, Any, List, Tuple
+import time
+from typing import Any, Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
 
 import config
 import database as db
-from detector import PoseDetector, DetectionResult
-from classifier import PostureClassifier, ClassificationResult, Status
+from classifier import ClassificationResult, PostureClassifier, Status
+from detector import DetectionResult, PoseDetector
 
 try:
     from notification_service import send_posture_line_notification
@@ -421,26 +424,35 @@ class CameraThread:
         detection: DetectionResult,
         classification: ClassificationResult,
     ) -> None:
-        """บันทึก alert แยก thread เพื่อลดอาการวิดีโอกระตุกตอนแจ้งเตือน"""
+        """
+        บันทึก alert แยก thread เพื่อลดอาการวิดีโอกระตุกตอนแจ้งเตือน
+
+        สำคัญ:
+        - จับ session_id และ user_id ณ ตอนเกิด alert ทันที
+        - ป้องกันกรณี user กด stop session ระหว่าง thread กำลังทำงาน
+        """
+        session_id = self._session.session_id
+        user_id = self._session.user_id
+
+        if session_id is None or user_id is None:
+            return
+
         thread = threading.Thread(
             target=self._save_alert,
-            args=(detection, classification),
+            args=(session_id, user_id, detection, classification),
             daemon=True,
         )
         thread.start()
 
     def _save_alert(
         self,
+        session_id: int,
+        user_id: int,
         detection: DetectionResult,
         classification: ClassificationResult,
     ) -> None:
         """บันทึก alert และ posture log แยกตามประเภท"""
-        session_id = self._session.session_id
-
-        if session_id is None:
-            return
-
-        alert_items = []
+        alert_items: List[Tuple[str, str, float]] = []
 
         if getattr(classification, "forward_head_alert", False):
             alert_items.append((
@@ -465,7 +477,11 @@ class CameraThread:
                 classification.bad_posture_duration,
             ))
 
-        self._send_line_notification(alert_items=alert_items)
+        self._send_line_notification(
+            session_id=session_id,
+            user_id=user_id,
+            alert_items=alert_items,
+        )
 
         for issue_type, message, duration in alert_items:
             db.log_alert(
@@ -484,9 +500,19 @@ class CameraThread:
 
     def _send_line_notification(
         self,
+        session_id: int,
+        user_id: int,
         alert_items: List[Tuple[str, str, float]],
     ) -> None:
-        """ส่ง LINE notification จาก alert_items โดยไม่ให้ backend crash ถ้าส่งล้มเหลว"""
+        """
+        ส่ง LINE notification จาก alert_items
+
+        สำคัญ:
+        - ส่ง user_id ของ session ปัจจุบันเข้า notification_service
+        - notification_service จะไปดึง users.line_user_id เอง
+        - ถ้า user ยังไม่ผูก LINE หรือปิด toggle จะ skip เฉพาะ LINE
+        - ถ้าส่ง LINE ล้มเหลว backend ต้องไม่ crash
+        """
         if not alert_items:
             return
 
@@ -506,7 +532,8 @@ class CameraThread:
         try:
             result = send_posture_line_notification(
                 issues=issues,
-                session_id=self._session.session_id,
+                session_id=session_id,
+                user_id=user_id,
                 force=False,
             )
 

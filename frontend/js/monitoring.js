@@ -45,7 +45,7 @@
     const FRONTEND_ALERT_COOLDOWN = 45000;
     const CONNECTION_ERROR_VISIBLE_LIMIT = 1;
 
-    const CVA_NORMAL_THRESHOLD = 50;
+    const CVA_NORMAL_THRESHOLD = 43;
     const FSA_NORMAL_THRESHOLD = 54;
 
     const $ = (id) => document.getElementById(id);
@@ -646,9 +646,12 @@
         setText("notifyDesc", "ยังไม่อนุญาต");
         return false;
     }
-        async function setupLineToggle() {
+
+    async function setupLineToggle() {
         const toggle = $("lineToggleBtn");
         const desc = $("lineDesc");
+
+        setupLineActionButtons();
 
         if (!toggle || !desc) {
             return;
@@ -657,6 +660,8 @@
         toggle.checked = false;
         toggle.disabled = true;
         desc.textContent = "กำลังตรวจสอบ...";
+
+        renderLineWaitingState();
 
         try {
             const status = await fetchLineStatus();
@@ -694,33 +699,388 @@
             toggle.checked = false;
             toggle.disabled = true;
             desc.textContent = "เชื่อมต่อไม่ได้";
+
+            renderLineErrorState(
+                "ยังไม่สามารถใช้งาน LINE ได้ในขณะนี้ กรุณาติดต่อผู้ดูแลระบบ"
+            );
         }
+    }
+
+    function setupLineActionButtons() {
+        const linkBtn = $("lineLinkBtn");
+        const copyBtn = $("lineCopyBtn");
+        const testBtn = $("lineTestBtn");
+
+        if (linkBtn) {
+            linkBtn.addEventListener("click", async () => {
+                linkBtn.disabled = true;
+                linkBtn.textContent = "กำลังสร้างรหัส...";
+
+                hideLineError();
+
+                try {
+                    const result = await createLineLinkCode();
+                    const status = normalizeLineStatusResponse(result) || result?.line || null;
+
+                    renderLineStatus(status);
+
+                    const code = result?.line_link_code || status?.line_link_code;
+                    const qrPayload = result?.qr_payload || result?.line_open_url || status?.qr_payload || status?.line_open_url;
+
+                    renderLineQr({
+                        code,
+                        qrPayload,
+                        lineOpenUrl: result?.line_open_url || status?.line_open_url || qrPayload,
+                        expiresAt: result?.line_link_code_expires_at || status?.line_link_code_expires_at,
+                    });
+
+                    showToast("สร้างรหัสผูก LINE แล้ว");
+                } catch (err) {
+                    console.warn("Cannot create LINE link code:", err);
+                    renderLineErrorState(
+                        "ยังไม่สามารถสร้างรหัสผูก LINE ได้ กรุณาลองใหม่อีกครั้ง"
+                    );
+                    showToast("สร้างรหัสผูก LINE ไม่สำเร็จ");
+                } finally {
+                    linkBtn.disabled = false;
+                    linkBtn.textContent = "ผูกบัญชี LINE";
+                }
+            });
+        }
+
+        if (copyBtn) {
+            copyBtn.addEventListener("click", async () => {
+                const code = getLineCodeText();
+
+                if (!code) {
+                    showToast("ยังไม่มีรหัสให้คัดลอก");
+                    return;
+                }
+
+                const copied = await copyText(code);
+
+                showToast(copied ? "คัดลอกรหัสแล้ว" : "คัดลอกไม่สำเร็จ");
+            });
+        }
+
+        if (testBtn) {
+            testBtn.addEventListener("click", async () => {
+                testBtn.disabled = true;
+                testBtn.textContent = "กำลังทดสอบ...";
+
+                hideLineError();
+
+                try {
+                    const result = await testLineNotification();
+
+                    if (result?.success === true) {
+                        showToast("ส่งข้อความทดสอบ LINE แล้ว");
+                    } else {
+                        showToast("ส่ง LINE ไม่สำเร็จ");
+                        renderLineErrorState(
+                            "ยังส่งข้อความทดสอบไม่ได้ กรุณาตรวจสอบว่าผูกบัญชี LINE แล้วและเปิดแจ้งเตือนอยู่"
+                        );
+                    }
+                } catch (err) {
+                    console.warn("Cannot test LINE notification:", err);
+                    showToast("ทดสอบ LINE ไม่สำเร็จ");
+                    renderLineErrorState(
+                        "ยังส่งข้อความทดสอบไม่ได้ กรุณาลองใหม่อีกครั้ง"
+                    );
+                } finally {
+                    testBtn.disabled = false;
+                    testBtn.textContent = "ทดสอบ LINE";
+                }
+            });
+        }
+    }
+
+    function getCurrentUserId() {
+        const user = utils.getCurrentUser ? utils.getCurrentUser() : null;
+
+        if (!user) {
+            return null;
+        }
+
+        const rawId = user.id ?? user.user_id ?? user.userId;
+        const userId = Number(rawId);
+
+        return Number.isInteger(userId) && userId > 0 ? userId : null;
+    }
+
+    function getLineCodeText() {
+        const codeEl = $("lineLinkCode");
+        const code = String(codeEl?.textContent || "").trim();
+
+        if (!code || code.includes("---")) {
+            return "";
+        }
+
+        return code;
+    }
+
+    function renderLineWaitingState() {
+        setText("lineStatusText", "กำลังตรวจสอบสถานะการผูกบัญชี LINE");
+        setText("lineHelpText", "สแกน QR Code แล้วกดส่งรหัสใน LINE เพื่อผูกบัญชี");
+
+        setLinePill("ตรวจสอบ", "is-waiting");
+        setLineError("");
+        hideLineQr();
     }
 
     function renderLineStatus(status) {
         const toggle = $("lineToggleBtn");
         const desc = $("lineDesc");
+        const linkBtn = $("lineLinkBtn");
+        const testBtn = $("lineTestBtn");
 
         if (!toggle || !desc || !status) {
             return;
         }
 
-        const hasToken = status.has_channel_access_token === true;
-        const hasSecret = status.has_channel_secret === true;
-        const hasUserId = status.has_line_user_id === true;
-        const enabled = status.line_enabled === true;
-        const ready = hasToken && hasSecret && hasUserId;
+        const systemReady =
+            status.system_ready === true ||
+            (
+                status.system_line_enabled === true &&
+                status.has_channel_access_token === true &&
+                status.has_channel_secret === true
+            );
 
-        toggle.checked = enabled;
+        const canCreateLinkCode =
+            status.can_create_link_code === true ||
+            status.has_line_official_account_id === true;
 
-        if (!ready) {
-            toggle.disabled = true;
-            desc.textContent = "ตั้งค่าไม่ครบ";
+        const isLinked = status.is_linked === true || status.has_line_user_id === true;
+        const enabled = status.line_notify_enabled === true || status.line_enabled === true;
+
+        toggle.checked = isLinked && enabled;
+        toggle.disabled = !systemReady || !isLinked;
+
+        if (!systemReady) {
+            desc.textContent = "ระบบยังไม่พร้อม";
+            setText(
+                "lineStatusText",
+                "ยังไม่สามารถใช้งาน LINE ได้ในขณะนี้ กรุณาติดต่อผู้ดูแลระบบ"
+            );
+            setText("lineHelpText", "ระบบยังไม่พร้อมสำหรับการแจ้งเตือนผ่าน LINE");
+            setLinePill("ยังไม่พร้อม", "is-error");
+
+            if (linkBtn) {
+                linkBtn.disabled = true;
+            }
+
+            if (testBtn) {
+                testBtn.hidden = true;
+                testBtn.disabled = true;
+            }
+
+            hideLineQr();
             return;
         }
 
-        toggle.disabled = false;
+        if (!canCreateLinkCode && !isLinked) {
+            desc.textContent = "ระบบยังไม่พร้อม";
+            setText(
+                "lineStatusText",
+                "ยังไม่สามารถใช้งาน LINE ได้ในขณะนี้ กรุณาติดต่อผู้ดูแลระบบ"
+            );
+            setText("lineHelpText", "ยังไม่ได้ตั้งค่าบัญชี LINE Official Account");
+            setLinePill("ยังไม่พร้อม", "is-error");
+
+            if (linkBtn) {
+                linkBtn.disabled = true;
+            }
+
+            if (testBtn) {
+                testBtn.hidden = true;
+                testBtn.disabled = true;
+            }
+
+            hideLineQr();
+            return;
+        }
+
+        if (!isLinked) {
+            desc.textContent = "ยังไม่ได้ผูก";
+            setText("lineStatusText", "ยังไม่ได้ผูกบัญชี LINE");
+            setText(
+                "lineHelpText",
+                "สแกน QR Code แล้วกดส่งรหัสใน LINE เพื่อผูกบัญชี"
+            );
+            setLinePill("ยังไม่ผูก", "is-warning");
+
+            if (linkBtn) {
+                linkBtn.disabled = false;
+                linkBtn.textContent = "ผูกบัญชี LINE";
+            }
+
+            if (testBtn) {
+                testBtn.hidden = true;
+                testBtn.disabled = true;
+            }
+
+            if (status.line_link_code_active && status.line_link_code) {
+                renderLineQr({
+                    code: status.line_link_code,
+                    qrPayload: status.qr_payload || status.line_open_url,
+                    lineOpenUrl: status.line_open_url || status.qr_payload,
+                    expiresAt: status.line_link_code_expires_at,
+                });
+            }
+
+            return;
+        }
+
         desc.textContent = enabled ? "เปิดอยู่" : "ปิดอยู่";
+        setText("lineStatusText", "ผูกบัญชี LINE แล้ว");
+        setText(
+            "lineHelpText",
+            enabled
+                ? "ระบบจะส่งแจ้งเตือน LINE เมื่อเกิด alert ตามเงื่อนไข"
+                : "เปิด toggle เพื่อรับแจ้งเตือนผ่าน LINE"
+        );
+        setLinePill(enabled ? "เปิดใช้งาน" : "ปิดอยู่", enabled ? "is-success" : "is-muted");
+
+        if (linkBtn) {
+            linkBtn.disabled = false;
+            linkBtn.textContent = "ผูกบัญชีใหม่";
+        }
+
+        if (testBtn) {
+            testBtn.hidden = false;
+            testBtn.disabled = !enabled;
+        }
+
+        hideLineQr();
+    }
+
+    function renderLineQr({ code, qrPayload, lineOpenUrl, expiresAt }) {
+        const qrArea = $("lineQrArea");
+        const qrBox = $("lineQrCode");
+        const codeEl = $("lineLinkCode");
+        const openBtn = $("lineOpenBtn");
+        const note = $("lineQrNote");
+
+        const cleanCode = String(code || "").trim().toUpperCase();
+        const cleanPayload = String(qrPayload || lineOpenUrl || "").trim();
+        const cleanOpenUrl = String(lineOpenUrl || qrPayload || "").trim();
+
+        if (!qrArea || !qrBox || !cleanCode || !cleanPayload) {
+            return;
+        }
+
+        qrArea.hidden = false;
+
+        if (codeEl) {
+            codeEl.textContent = cleanCode;
+        }
+
+        qrBox.innerHTML = "";
+
+        if (window.QRCode) {
+            try {
+                new QRCode(qrBox, {
+                    text: cleanPayload,
+                    width: 164,
+                    height: 164,
+                    correctLevel: QRCode.CorrectLevel.M,
+                });
+            } catch (err) {
+                console.warn("Cannot render QRCode:", err);
+                qrBox.innerHTML = '<span class="line-qr-placeholder">เปิด LINE</span>';
+            }
+        } else {
+            qrBox.innerHTML = '<span class="line-qr-placeholder">เปิด LINE</span>';
+        }
+
+        if (openBtn) {
+            if (cleanOpenUrl) {
+                openBtn.href = cleanOpenUrl;
+                openBtn.hidden = false;
+            } else {
+                openBtn.removeAttribute("href");
+                openBtn.hidden = true;
+            }
+        }
+
+        if (note) {
+            note.textContent = expiresAt
+                ? `รหัสนี้มีเวลาจำกัด หากหมดอายุให้กดผูกบัญชี LINE ใหม่`
+                : "หลังจากเปิด LINE แล้ว ให้กดส่งรหัสที่ระบบเตรียมไว้ในช่องแชต";
+        }
+
+        setText("lineStatusText", "สแกน QR Code แล้วกดส่งรหัสใน LINE เพื่อผูกบัญชี");
+        setText("lineHelpText", "ถ้าสแกนไม่ได้ ให้คัดลอกรหัสแล้วส่งในแชต LINE Official Account");
+        setLinePill("รอผูกบัญชี", "is-warning");
+    }
+
+    function hideLineQr() {
+        const qrArea = $("lineQrArea");
+        const qrBox = $("lineQrCode");
+        const openBtn = $("lineOpenBtn");
+
+        if (qrArea) {
+            qrArea.hidden = true;
+        }
+
+        if (qrBox) {
+            qrBox.innerHTML = '<span class="line-qr-placeholder">QR</span>';
+        }
+
+        if (openBtn) {
+            openBtn.hidden = true;
+            openBtn.removeAttribute("href");
+        }
+
+        setText("lineLinkCode", "PG-------");
+    }
+
+    function renderLineErrorState(message) {
+        setLinePill("มีปัญหา", "is-error");
+        setLineError(message);
+    }
+
+    function hideLineError() {
+        setLineError("");
+    }
+
+    function setLineError(message) {
+        const errorEl = $("lineErrorText");
+        const text = String(message || "").trim();
+
+        if (!errorEl) {
+            return;
+        }
+
+        if (!text) {
+            errorEl.hidden = true;
+            errorEl.textContent = "";
+            return;
+        }
+
+        errorEl.hidden = false;
+        errorEl.textContent = text;
+    }
+
+    function setLinePill(text, className) {
+        const pill = $("lineStatusPill");
+
+        if (!pill) {
+            return;
+        }
+
+        pill.textContent = text;
+        pill.classList.remove(
+            "is-waiting",
+            "is-warning",
+            "is-success",
+            "is-error",
+            "is-muted"
+        );
+
+        if (className) {
+            pill.classList.add(className);
+        }
     }
 
     async function fetchLineStatusSafe() {
@@ -740,7 +1100,10 @@
     }
 
     async function fetchLineStatus() {
-        const response = await fetch(`${utils.API_BASE}/notification/line/status`, {
+        const userId = getCurrentUserId();
+        const query = userId ? `?user_id=${encodeURIComponent(userId)}` : "";
+
+        const response = await fetch(`${utils.API_BASE}/notification/line/status${query}`, {
             method: "GET",
             headers: {
                 "Content-Type": "application/json",
@@ -769,13 +1132,49 @@
         return status;
     }
 
+    async function createLineLinkCode() {
+        const userId = getCurrentUserId();
+
+        if (!userId) {
+            throw new Error("ไม่พบข้อมูลผู้ใช้ที่เข้าสู่ระบบ");
+        }
+
+        const response = await fetch(`${utils.API_BASE}/notification/line/link-code`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ user_id: userId }),
+        });
+
+        const contentType = response.headers.get("content-type") || "";
+        const data = contentType.includes("application/json")
+            ? await response.json()
+            : null;
+
+        if (!response.ok) {
+            throw new Error(data?.detail || `LINE link code error ${response.status}`);
+        }
+
+        if (data && data.success === false) {
+            throw new Error(data.detail || data.message || "LINE link code failed");
+        }
+
+        return data;
+    }
+
     async function setLineEnabled(enabled) {
+        const userId = getCurrentUserId();
+        const body = userId
+            ? { user_id: userId, enabled }
+            : { enabled };
+
         const response = await fetch(`${utils.API_BASE}/notification/line/enabled`, {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
             },
-            body: JSON.stringify({ enabled }),
+            body: JSON.stringify(body),
         });
 
         const contentType = response.headers.get("content-type") || "";
@@ -800,10 +1199,71 @@
         return status;
     }
 
+    async function testLineNotification() {
+        const userId = getCurrentUserId();
+
+        if (!userId) {
+            throw new Error("ไม่พบข้อมูลผู้ใช้ที่เข้าสู่ระบบ");
+        }
+
+        const response = await fetch(`${utils.API_BASE}/notification/test-line`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ user_id: userId }),
+        });
+
+        const contentType = response.headers.get("content-type") || "";
+        const data = contentType.includes("application/json")
+            ? await response.json()
+            : null;
+
+        if (!response.ok) {
+            throw new Error(data?.detail || `LINE test error ${response.status}`);
+        }
+
+        return data;
+    }
+
+    async function copyText(text) {
+        const value = String(text || "").trim();
+
+        if (!value) {
+            return false;
+        }
+
+        if (navigator.clipboard && window.isSecureContext) {
+            try {
+                await navigator.clipboard.writeText(value);
+                return true;
+            } catch (err) {
+                console.warn("Clipboard API failed:", err);
+            }
+        }
+
+        try {
+            const textarea = document.createElement("textarea");
+            textarea.value = value;
+            textarea.setAttribute("readonly", "");
+            textarea.style.position = "fixed";
+            textarea.style.left = "-9999px";
+            document.body.appendChild(textarea);
+            textarea.select();
+
+            const success = document.execCommand("copy");
+            document.body.removeChild(textarea);
+
+            return success;
+        } catch (err) {
+            console.warn("Fallback copy failed:", err);
+            return false;
+        }
+    }
+
     /* =========================
        Polling
     ========================= */
-
     function startPolling() {
         if (videoInterval || pollInterval || elapsedInterval) {
             return;
@@ -1187,7 +1647,7 @@
     }
 
     function updateIssueStatus(type, status) {
-        const config = {
+        const configMap = {
             good: {
                 label: "ปกติ",
                 cardClass: "is-good",
@@ -1210,7 +1670,7 @@
             },
         };
 
-        const item = config[status] || config.waiting;
+        const item = configMap[status] || configMap.waiting;
         const card = type === "cva" ? $("cvaMetricCard") : $("fsaMetricCard");
         const pill = type === "cva" ? $("cvaStatusPill") : $("fsaStatusPill");
 

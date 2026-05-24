@@ -7,6 +7,7 @@
    - ต้องโหลดก่อน JS เฉพาะหน้าเสมอ
    - ไม่มี Calibration / Baseline
    - realtime mode ใช้ planned_duration_minutes = 0
+   - เพิ่ม API helper สำหรับ LINE multi-user binding
 ========================================= */
 
 (function () {
@@ -134,6 +135,42 @@
         videoFrameUrl() {
             return `${API_BASE}/video/frame?t=${Date.now()}`;
         },
+
+        /* =========================
+           LINE Notification API
+        ========================= */
+
+        getLineStatus(userId = null) {
+            const query = userId ? `?user_id=${encodeURIComponent(userId)}` : "";
+            return apiRequest("GET", `/notification/line/status${query}`);
+        },
+
+        createLineLinkCode(userId) {
+            return apiRequest("POST", "/notification/line/link-code", {
+                user_id: userId,
+            });
+        },
+
+        setLineEnabled(userId, enabled) {
+            const payload = userId
+                ? {
+                    user_id: userId,
+                    enabled: Boolean(enabled),
+                }
+                : {
+                    enabled: Boolean(enabled),
+                };
+
+            return apiRequest("POST", "/notification/line/enabled", payload);
+        },
+
+        testLineNotification(userId) {
+            const payload = userId
+                ? { user_id: userId }
+                : {};
+
+            return apiRequest("POST", "/notification/test-line", payload);
+        },
     };
 
     /* =========================
@@ -168,6 +205,19 @@
             localStorage.removeItem(STORAGE_KEYS.currentUser);
             return null;
         }
+    }
+
+    function getCurrentUserId() {
+        const user = getCurrentUser();
+
+        if (!user) {
+            return null;
+        }
+
+        const rawId = user.id ?? user.user_id ?? user.userId;
+        const userId = Number(rawId);
+
+        return Number.isInteger(userId) && userId > 0 ? userId : null;
     }
 
     function isAuthenticated() {
@@ -421,15 +471,20 @@
     window.utils = {
         API_BASE,
         STORAGE_KEYS,
+
         getCurrentPage,
         redirectTo,
+
         getCurrentUser,
+        getCurrentUserId,
         isAuthenticated,
+
         isMonitoringSessionActive,
         markMonitoringSessionStarted,
         markMonitoringSessionStopped,
         clearSessionFlowState,
         getLastSessionSummary,
+
         getBackendSessionStatus,
         requireAuth,
         redirectAuthenticatedAwayFromAuthPage,
@@ -438,6 +493,7 @@
         requireSummaryAccess,
         requireHistoryAccess,
         enforceCurrentPageFlow,
+
         logout,
     };
 

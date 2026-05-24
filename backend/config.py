@@ -9,10 +9,13 @@
 # - ไม่ใช้ hip landmark เป็นเงื่อนไขหลักของระบบ
 # - ใช้ marker สีเขียวเฉพาะจุดกกหู / tragus เป็นตัวช่วย
 # - แยกเวลาจับคอยื่นและไหล่ห่อ
-# - แจ้งเตือนเมื่อผิดท่าต่อเนื่องครบ 3 นาที
-# - หากยังผิดท่าต่อเนื่อง ให้แจ้งเตือนซ้ำทุก 3 นาที
+# - แจ้งเตือนเมื่อผิดท่าต่อเนื่องครบเวลาที่กำหนด
+# - หากยังผิดท่าต่อเนื่อง ให้แจ้งเตือนซ้ำตาม repeat interval
+# - เพิ่ม config สำหรับ LINE binding แบบ multi-user
 
+import os
 from pathlib import Path
+
 
 # ========================
 # Paths
@@ -20,6 +23,7 @@ from pathlib import Path
 
 BASE_DIR: Path = Path(__file__).resolve().parent.parent
 DATABASE_PATH: Path = BASE_DIR / "database" / "posture.db"
+
 
 # ========================
 # Camera
@@ -30,6 +34,7 @@ CAMERA_WIDTH: int = 640
 CAMERA_HEIGHT: int = 480
 CAMERA_FPS: int = 15
 JPEG_QUALITY: int = 60
+
 
 # ========================
 # Performance
@@ -43,6 +48,7 @@ PROCESS_EVERY_N_FRAMES: int = 2
 
 # cache JPEG เพื่อลดการ encode ภาพซ้ำถี่เกินไป
 JPEG_CACHE_SECONDS: float = 0.20
+
 
 # ========================
 # MediaPipe Pose
@@ -70,6 +76,7 @@ DRAW_FULL_BODY_SKELETON: bool = False
 # -1 = ด้านหน้าอยู่ทางซ้ายของภาพ
 CAMERA_FORWARD_DIRECTION: int = 1
 
+
 # ========================
 # CVA — Forward Head Posture / คอยื่น
 # ========================
@@ -77,8 +84,8 @@ CAMERA_FORWARD_DIRECTION: int = 1
 # CVA = Craniovertebral Angle
 #
 # เกณฑ์ใหม่:
-# - ปกติ    : CVA >= 50 องศา
-# - อันตราย : CVA < 50 องศา
+# - ปกติ    : CVA >= 43 องศา
+# - อันตราย : CVA < 43 องศา
 #
 # ไม่มีระดับเฝ้าระวังแล้ว
 
@@ -87,6 +94,7 @@ FORWARD_HEAD_GOOD_THRESHOLD: float = 43.0
 # เก็บไว้เพื่อรองรับโค้ดเดิม แต่ใช้ค่าเดียวกับ GOOD_THRESHOLD
 FORWARD_HEAD_BAD_THRESHOLD: float = 43.0
 FORWARD_HEAD_SEVERE_THRESHOLD: float = 43.0
+
 
 # ========================
 # FSA — Rounded Shoulder Posture / ไหล่ห่อ
@@ -106,6 +114,7 @@ ROUNDED_SHOULDER_GOOD_THRESHOLD: float = 54.0
 ROUNDED_SHOULDER_BAD_THRESHOLD: float = 54.0
 ROUNDED_SHOULDER_SEVERE_THRESHOLD: float = 54.0
 
+
 # ========================
 # C7 Estimation
 # ========================
@@ -119,6 +128,7 @@ ROUNDED_SHOULDER_SEVERE_THRESHOLD: float = 54.0
 C7_UP_OFFSET_RATIO: float = 0.08
 C7_BACK_OFFSET_RATIO: float = 0.04
 
+
 # ========================
 # Tragus Estimation
 # ========================
@@ -128,6 +138,7 @@ C7_BACK_OFFSET_RATIO: float = 0.04
 # ถ้าเปิด marker สีเขียว ระบบจะใช้ marker กกหูแทนค่านี้
 
 TRAGUS_FORWARD_OFFSET_RATIO: float = 0.018
+
 
 # ========================
 # Green Marker Detection
@@ -149,6 +160,7 @@ GREEN_HSV_UPPER: tuple[int, int, int] = (85, 255, 255)
 GREEN_MARKER_MIN_AREA: int = 40
 GREEN_MARKER_MAX_AREA: int = 10000
 
+
 # ========================
 # Marker Assignment Scoring
 # ========================
@@ -162,33 +174,37 @@ GREEN_MARKER_MAX_AREA: int = 10000
 MARKER_ASSIGNMENT_MAX_COST: float = 2.5
 
 # น้ำหนัก temporal consistency
-# 0 = ไม่สนเฟรมก่อนเลย (เปลี่ยนทันที)
+# 0 = ไม่สนเฟรมก่อนเลย เปลี่ยนทันที
 # 0.6 = แนะนำ ช่วยลดอาการสลับกะพริบ
 # 1.0+ = เกาะติดเฟรมก่อน อาจหน่วงตอนผู้ใช้ขยับ
 MARKER_TEMPORAL_WEIGHT: float = 0.6
+
 
 # ========================
 # Alert Timing
 # ========================
 #
-# แจ้งเตือนเมื่อผู้ใช้นั่งผิดท่าต่อเนื่องเกิน 3 นาที
-# 3 นาที = 180 วินาที
-#
-# Logic ใหม่:
+# Logic:
 # - คอยื่นมี timer แยก
 # - ไหล่ห่อมี timer แยก
-# - ก่อนครบ 3 นาที ยังนับเป็นท่าทางเหมาะสม
-# - ครบ 3 นาทีแล้วจึง alert
-# - ถ้ายังผิดท่าต่อ ให้แจ้งเตือนซ้ำทุก 3 นาที
+# - ก่อนครบเวลาที่กำหนด ยังนับเป็นท่าทางเหมาะสม
+# - ครบเวลาแล้วจึง alert
+# - ถ้ายังผิดท่าต่อ ให้แจ้งเตือนซ้ำตาม repeat interval
 # - ถ้ากลับมาปกติ reset timer ของปัญหานั้นทันที
+#
+# หมายเหตุ:
+# - ตอนทดสอบอาจตั้งเป็น 10 วินาทีได้
+# - ตอนใช้งานจริงแนะนำ 180 วินาที
 
 # ระยะเวลาที่ต้องผิดท่าต่อเนื่องก่อนแจ้งเตือน
-# 180 วินาที = 3 นาที
 ISSUE_ALERT_DURATION: float = 10
 
 # ระยะเวลาแจ้งเตือนซ้ำ หากยังผิดท่าต่อเนื่อง
-# 180 วินาที = 3 นาที
 ISSUE_REPEAT_ALERT_INTERVAL: float = 10
+
+# ให้ notification_service ใช้ชื่อกลางนี้ได้
+# เพื่อรักษา duplicate guard ให้ตรงกับ repeat interval ของระบบหลัก
+ALERT_REPEAT_INTERVAL: float = ISSUE_REPEAT_ALERT_INTERVAL
 
 # ค่าเก่า เก็บไว้รองรับโค้ดเดิม
 BAD_POSTURE_DURATION_MILD: float = ISSUE_ALERT_DURATION
@@ -205,8 +221,79 @@ BAD_POSTURE_DURATION: float = ISSUE_ALERT_DURATION
 GRACE_PERIOD: float = 0.0
 
 # หลังจากแจ้งเตือนแล้ว ถ้ายังผิดอยู่ จะเตือนซ้ำทุกกี่วินาที
-# ตั้งเป็น 180 เพื่อให้ตรงกับ ISSUE_REPEAT_ALERT_INTERVAL
 ALERT_COOLDOWN: float = ISSUE_REPEAT_ALERT_INTERVAL
+
+
+# ========================
+# LINE Messaging API
+# ========================
+#
+# ค่า token จริงต้องอยู่ใน backend/.env เท่านั้น
+#
+# .env ตัวอย่าง:
+# LINE_ENABLED=true
+# LINE_CHANNEL_ACCESS_TOKEN=ใส่_token_จริง_ในเครื่องตัวเอง
+# LINE_CHANNEL_SECRET=ใส่_channel_secret_จริง_ในเครื่องตัวเอง
+# LINE_OFFICIAL_ACCOUNT_ID=@your_oa_id
+#
+# ไม่ควรใช้ LINE_USER_ID เป็นปลายทางหลักในระบบ multi-user แล้ว
+# เพราะ user แต่ละคนจะมี users.line_user_id ของตัวเองใน SQLite
+#
+# หมายเหตุ:
+# - ตัวแปรด้านล่างอ่านจาก environment variable
+# - notification_service.py ยังอ่าน backend/.env เองได้ด้วย
+# - ห้ามใส่ token จริงใน source code
+
+LINE_ENABLED: bool = os.getenv("LINE_ENABLED", "true").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "y",
+    "on",
+}
+
+LINE_CHANNEL_ACCESS_TOKEN: str = os.getenv(
+    "LINE_CHANNEL_ACCESS_TOKEN",
+    "",
+).strip()
+
+LINE_CHANNEL_SECRET: str = os.getenv(
+    "LINE_CHANNEL_SECRET",
+    "",
+).strip()
+
+# ใช้สร้าง QR / link เปิด LINE Official Account พร้อมรหัส PG-xxxxxx
+# ตัวอย่าง: @postureguardai
+LINE_OFFICIAL_ACCOUNT_ID: str = os.getenv(
+    "LINE_OFFICIAL_ACCOUNT_ID",
+    "",
+).strip()
+
+# เก็บไว้เพื่อ backward compatibility เท่านั้น
+# ระบบ multi-user ไม่ควรใช้เป็นปลายทางหลัก
+LINE_USER_ID: str = os.getenv(
+    "LINE_USER_ID",
+    "",
+).strip()
+
+# อายุรหัสผูกบัญชี LINE เช่น PG-482913
+LINE_LINK_CODE_TTL_MINUTES: int = int(
+    os.getenv("LINE_LINK_CODE_TTL_MINUTES", "10")
+)
+
+# Production ควรเป็น True เสมอ
+# ถ้าทดสอบ webhook ด้วย payload ปลอมใน local อาจตั้ง False ชั่วคราวได้
+LINE_VERIFY_WEBHOOK_SIGNATURE: bool = os.getenv(
+    "LINE_VERIFY_WEBHOOK_SIGNATURE",
+    "true",
+).strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "y",
+    "on",
+}
+
 
 # ========================
 # Session Risk Level

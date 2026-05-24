@@ -126,7 +126,10 @@
                                     aria-modal="false" aria-labelledby="settingsTitle" hidden>
 
                                     <div class="panel-head">
-                                        <h3 class="panel-title" id="settingsTitle">ตั้งค่าการแจ้งเตือน</h3>
+                                        <div>
+                                            <h3 class="panel-title" id="settingsTitle">ตั้งค่าการแจ้งเตือน</h3>
+                                            <p class="panel-subtitle">เลือกช่องทางแจ้งเตือนที่ต้องการใช้ระหว่างตรวจจับ</p>
+                                        </div>
 
                                         <button class="panel-close-btn" id="settingsCloseBtn" type="button"
                                             aria-label="ปิดหน้าตั้งค่า">
@@ -171,9 +174,72 @@
 
                                             <span class="settings-toggle-text">
                                                 <span class="settings-toggle-title">แจ้งเตือน LINE</span>
-                                                <span class="settings-toggle-desc" id="lineDesc">รอเชื่อมต่อ</span>
+                                                <span class="settings-toggle-desc" id="lineDesc">กำลังตรวจสอบ</span>
                                             </span>
                                         </label>
+
+                                        <section class="line-link-card" id="lineBindingCard"
+                                            aria-labelledby="lineBindingTitle">
+                                            <div class="line-link-head">
+                                                <div>
+                                                    <h4 class="line-link-title" id="lineBindingTitle">
+                                                        ผูกบัญชี LINE
+                                                    </h4>
+                                                    <p class="line-link-desc" id="lineStatusText">
+                                                        กำลังตรวจสอบสถานะการผูกบัญชี LINE
+                                                    </p>
+                                                </div>
+
+                                                <span class="line-status-pill is-waiting" id="lineStatusPill">
+                                                    ตรวจสอบ
+                                                </span>
+                                            </div>
+
+                                            <p class="line-help-text" id="lineHelpText">
+                                                สแกน QR Code แล้วกดส่งรหัสใน LINE เพื่อผูกบัญชี
+                                            </p>
+
+                                            <div class="line-action-row">
+                                                <button class="line-action-btn is-primary" id="lineLinkBtn"
+                                                    type="button">
+                                                    ผูกบัญชี LINE
+                                                </button>
+
+                                                <button class="line-action-btn" id="lineTestBtn" type="button"
+                                                    disabled hidden>
+                                                    ทดสอบ LINE
+                                                </button>
+                                            </div>
+
+                                            <div class="line-qr-area" id="lineQrArea" hidden>
+                                                <div class="line-qr-box" id="lineQrCode" aria-label="QR Code สำหรับผูกบัญชี LINE">
+                                                    <span class="line-qr-placeholder">QR</span>
+                                                </div>
+
+                                                <div class="line-code-box">
+                                                    <span class="line-code-label">รหัสผูกบัญชี</span>
+
+                                                    <div class="line-code-row">
+                                                        <code class="line-code-value" id="lineLinkCode">PG-------</code>
+
+                                                        <button class="line-copy-btn" id="lineCopyBtn" type="button">
+                                                            Copy
+                                                        </button>
+                                                    </div>
+                                                </div>
+
+                                                <a class="line-open-link" id="lineOpenBtn" href="#" target="_blank"
+                                                    rel="noopener" hidden>
+                                                    เปิด LINE
+                                                </a>
+
+                                                <p class="line-qr-note" id="lineQrNote">
+                                                    หลังจากเปิด LINE แล้ว ให้กดส่งรหัสที่ระบบเตรียมไว้ในช่องแชต
+                                                </p>
+                                            </div>
+
+                                            <p class="line-error-text" id="lineErrorText" hidden></p>
+                                        </section>
                                     </div>
                                 </section>
                             </div>
@@ -214,7 +280,7 @@
                             </div>
 
                             <span class="metric-hint" id="cvaHint">กำลังอ่านค่า</span>
-                            <small class="metric-threshold">เกณฑ์ปกติ CVA &gt; 50°</small>
+                            <small class="metric-threshold">เกณฑ์ปกติ CVA ≥ 43°</small>
                         </article>
 
                         <article class="metric" id="fsaMetricCard">
@@ -229,7 +295,7 @@
                             </div>
 
                             <span class="metric-hint" id="fsaHint">กำลังอ่านค่า</span>
-                            <small class="metric-threshold">เกณฑ์ปกติ FSA &gt; 54°</small>
+                            <small class="metric-threshold">เกณฑ์ปกติ FSA ≥ 54°</small>
                         </article>
                     </section>
 
@@ -247,6 +313,14 @@
     <script src="../js/app.js"></script>
     <script src="../js/layout.js"></script>
     <script src="../js/alert-speech.js"></script>
+
+    <!--
+        ใช้ qrcodejs สำหรับสร้าง QR ฝั่งหน้าเว็บแบบง่าย
+        ถ้าเครื่องทดสอบไม่มีอินเทอร์เน็ต QR อาจไม่ขึ้น
+        แต่ปุ่ม Copy และปุ่มเปิด LINE ยังใช้เป็น fallback ได้จาก monitoring.js
+    -->
+    <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+
     <script src="../js/monitoring.js"></script>
 </body>
 

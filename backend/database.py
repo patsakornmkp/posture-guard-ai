@@ -1,21 +1,21 @@
 # database.py
 # จัดการฐานข้อมูล SQLite ของระบบ PostureGuard Backend
 #
-# เวอร์ชันใหม่:
+# เวอร์ชันนี้:
 # - ใช้ CVA สำหรับภาวะคอยื่น
 # - ใช้ FSA สำหรับภาวะไหล่ห่อ
-# - ลบ warning_seconds ออกจาก schema และ logic หลัก
-# - ลบการใช้งาน hunched_back / หลังคร่อม ออกจาก logic หลัก
-# - เพิ่มเวลาที่ตรวจเจอผู้ใช้งานจริง:
-#   effective_seated_seconds
-# - เพิ่มจำนวนแจ้งเตือนแยกตามสาเหตุ:
-#   forward_head_alert_count
-#   rounded_shoulder_alert_count
-# - เพิ่ม migration รองรับฐานข้อมูลเก่าที่อาจยังไม่มี column ใหม่
+# - ไม่ใช้ Calibration / Baseline
+# - เพิ่มเวลาที่ตรวจเจอผู้ใช้งานจริง: effective_seated_seconds
+# - เพิ่มจำนวนแจ้งเตือนแยกตามสาเหตุ
+# - เพิ่ม LINE binding แบบ multi-user โดยไม่ลบข้อมูล users เดิม
 
-import sqlite3
+from __future__ import annotations
+
 import hashlib
+import secrets
+import sqlite3
 from contextlib import contextmanager
+from datetime import datetime, timedelta
 from typing import Optional
 
 import config
@@ -56,6 +56,12 @@ CREATE TABLE IF NOT EXISTS users (
     username TEXT UNIQUE NOT NULL,
     password_hash TEXT NOT NULL,
     full_name TEXT,
+
+    line_user_id TEXT,
+    line_notify_enabled INTEGER DEFAULT 0,
+    line_link_code TEXT,
+    line_link_code_expires_at DATETIME,
+
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -130,19 +136,91 @@ def _add_column_if_missing(
     )
 
 
+def _create_index_if_missing(
+    conn: sqlite3.Connection,
+    index_name: str,
+    sql: str,
+) -> None:
+    exists = conn.execute(
+        """
+        SELECT 1
+        FROM sqlite_master
+        WHERE type = 'index'
+          AND name = ?
+        LIMIT 1
+        """,
+        (index_name,),
+    ).fetchone()
+
+    if exists:
+        return
+
+    conn.execute(sql)
+
+
 def init_database() -> None:
     """
-    สร้างฐานข้อมูลและ migration เบื้องต้น
+    สร้างฐานข้อมูลและ migration แบบปลอดภัย
 
     หมายเหตุ:
     - ถ้าเป็น database ใหม่ จะสร้าง schema ใหม่ตาม SCHEMA_SQL
-    - ถ้าเป็น database เก่า จะเพิ่ม column ใหม่ที่จำเป็น
-    - warning_seconds เดิมอาจยังค้างอยู่ในไฟล์ .db เก่า
-      แต่ระบบใหม่จะไม่อ่าน/ไม่เขียนค่านี้แล้ว
+    - ถ้าเป็น database เก่า จะเพิ่ม column ใหม่ที่จำเป็นด้วย ALTER TABLE
+    - ไม่ drop table
+    - ไม่ลบข้อมูล users/sessions เดิม
     """
     with get_connection() as conn:
         conn.executescript(SCHEMA_SQL)
 
+        # ---- users: migration จากฐานข้อมูลเก่า ----
+        _add_column_if_missing(
+            conn,
+            table_name="users",
+            column_name="full_name",
+            column_definition="TEXT",
+        )
+
+        # ---- users: LINE binding columns ----
+        _add_column_if_missing(
+            conn,
+            table_name="users",
+            column_name="line_user_id",
+            column_definition="TEXT",
+        )
+
+        _add_column_if_missing(
+            conn,
+            table_name="users",
+            column_name="line_notify_enabled",
+            column_definition="INTEGER DEFAULT 0",
+        )
+
+        _add_column_if_missing(
+            conn,
+            table_name="users",
+            column_name="line_link_code",
+            column_definition="TEXT",
+        )
+
+        _add_column_if_missing(
+            conn,
+            table_name="users",
+            column_name="line_link_code_expires_at",
+            column_definition="DATETIME",
+        )
+
+        _create_index_if_missing(
+            conn,
+            index_name="idx_users_line_link_code",
+            sql="CREATE INDEX idx_users_line_link_code ON users(line_link_code)",
+        )
+
+        _create_index_if_missing(
+            conn,
+            index_name="idx_users_line_user_id",
+            sql="CREATE INDEX idx_users_line_user_id ON users(line_user_id)",
+        )
+
+        # ---- sessions: migration จากฐานข้อมูลเก่า ----
         _add_column_if_missing(
             conn,
             table_name="sessions",
@@ -214,6 +292,16 @@ def create_user(username: str, password: str, full_name: str = "") -> int:
         return cur.lastrowid
 
 
+def get_user_by_id(user_id: int) -> Optional[dict]:
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM users WHERE id = ?",
+            (user_id,),
+        ).fetchone()
+
+        return dict(row) if row else None
+
+
 def get_user_by_username(username: str) -> Optional[dict]:
     with get_connection() as conn:
         row = conn.execute(
@@ -235,6 +323,237 @@ def authenticate(username: str, password: str) -> Optional[dict]:
 
     user.pop("password_hash", None)
     return user
+
+
+# ========================
+# LINE binding per user
+# ========================
+
+def _utc_datetime_string(value: datetime) -> str:
+    """เก็บเวลาแบบ UTC ให้เทียบกับ SQLite CURRENT_TIMESTAMP ได้ตรงกัน"""
+    return value.replace(microsecond=0).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _normalize_line_code(code: str) -> str:
+    return str(code or "").strip().upper()
+
+
+def _generate_line_link_code() -> str:
+    """สร้างรหัสรูปแบบ PG-482913"""
+    return f"PG-{secrets.randbelow(900000) + 100000}"
+
+
+def get_user_line_status(user_id: int) -> Optional[dict]:
+    """
+    คืนสถานะ LINE binding ของ user เดียว
+
+    ไม่คืนค่า token หรือ secret ใด ๆ
+    ใช้สำหรับ endpoint:
+    GET /notification/line/status?user_id={user_id}
+    """
+    with get_connection() as conn:
+        row = conn.execute(
+            """
+            SELECT
+                id,
+                username,
+                full_name,
+                line_user_id,
+                COALESCE(line_notify_enabled, 0) AS line_notify_enabled,
+                line_link_code,
+                line_link_code_expires_at,
+                CASE
+                    WHEN line_link_code IS NOT NULL
+                     AND line_link_code_expires_at IS NOT NULL
+                     AND line_link_code_expires_at > CURRENT_TIMESTAMP
+                    THEN 1 ELSE 0
+                END AS line_link_code_active
+            FROM users
+            WHERE id = ?
+            """,
+            (user_id,),
+        ).fetchone()
+
+        return dict(row) if row else None
+
+
+def create_line_link_code(user_id: int, ttl_minutes: int = 10) -> Optional[dict]:
+    """
+    สร้างรหัสผูก LINE ให้ user
+
+    - ไม่แตะ password/session เดิม
+    - ถ้ารหัสซ้ำจะสุ่มใหม่
+    - รหัสหมดอายุตาม ttl_minutes
+    """
+    expires_at = _utc_datetime_string(
+        datetime.utcnow() + timedelta(minutes=max(1, ttl_minutes))
+    )
+
+    with get_connection() as conn:
+        user_exists = conn.execute(
+            "SELECT 1 FROM users WHERE id = ? LIMIT 1",
+            (user_id,),
+        ).fetchone()
+
+        if not user_exists:
+            return None
+
+        code = _generate_line_link_code()
+
+        for _ in range(20):
+            duplicate = conn.execute(
+                """
+                SELECT 1
+                FROM users
+                WHERE line_link_code = ?
+                  AND line_link_code_expires_at > CURRENT_TIMESTAMP
+                LIMIT 1
+                """,
+                (code,),
+            ).fetchone()
+
+            if not duplicate:
+                break
+
+            code = _generate_line_link_code()
+        else:
+            raise RuntimeError("Cannot generate unique LINE link code")
+
+        conn.execute(
+            """
+            UPDATE users
+            SET line_link_code = ?,
+                line_link_code_expires_at = ?
+            WHERE id = ?
+            """,
+            (code, expires_at, user_id),
+        )
+
+    return get_user_line_status(user_id)
+
+
+def set_user_line_notify_enabled(user_id: int, enabled: bool) -> Optional[dict]:
+    """
+    เปิด/ปิด LINE notification เฉพาะ user นั้น
+
+    หมายเหตุ:
+    - ฟังก์ชันนี้ไม่ลบ line_user_id
+    - ถ้าปิด toggle จะยังถือว่าผูกบัญชีอยู่ แต่ไม่ส่งแจ้งเตือน
+    """
+    with get_connection() as conn:
+        user_exists = conn.execute(
+            "SELECT 1 FROM users WHERE id = ? LIMIT 1",
+            (user_id,),
+        ).fetchone()
+
+        if not user_exists:
+            return None
+
+        conn.execute(
+            """
+            UPDATE users
+            SET line_notify_enabled = ?
+            WHERE id = ?
+            """,
+            (1 if enabled else 0, user_id),
+        )
+
+    return get_user_line_status(user_id)
+
+
+def clear_expired_line_link_code(code: str) -> None:
+    """
+    ล้างรหัสที่หมดอายุแล้วตาม code
+
+    ใช้กรณี user ส่งรหัสเข้ามาใน LINE แต่รหัสหมดอายุแล้ว
+    เพื่อไม่ให้รหัสค้างในฐานข้อมูล
+    """
+    normalized_code = _normalize_line_code(code)
+
+    if not normalized_code:
+        return
+
+    with get_connection() as conn:
+        conn.execute(
+            """
+            UPDATE users
+            SET line_link_code = NULL,
+                line_link_code_expires_at = NULL
+            WHERE UPPER(line_link_code) = ?
+              AND line_link_code_expires_at <= CURRENT_TIMESTAMP
+            """,
+            (normalized_code,),
+        )
+
+
+def clear_all_expired_line_link_codes() -> int:
+    """
+    ล้างรหัสผูก LINE ทั้งหมดที่หมดอายุแล้ว
+
+    ไม่แตะ line_user_id เดิม
+    ไม่ปิด line_notify_enabled ของ user ที่ผูกสำเร็จแล้ว
+    """
+    with get_connection() as conn:
+        cur = conn.execute(
+            """
+            UPDATE users
+            SET line_link_code = NULL,
+                line_link_code_expires_at = NULL
+            WHERE line_link_code IS NOT NULL
+              AND line_link_code_expires_at IS NOT NULL
+              AND line_link_code_expires_at <= CURRENT_TIMESTAMP
+            """
+        )
+
+        return cur.rowcount
+
+
+def bind_line_user_by_code(code: str, line_user_id: str) -> Optional[dict]:
+    """
+    ผูก LINE userId จาก webhook เข้ากับ user ในเว็บ
+
+    เงื่อนไข:
+    - code ต้องตรงกับ users.line_link_code
+    - code ต้องยังไม่หมดอายุ
+    - เมื่อผูกสำเร็จจะเปิด line_notify_enabled = 1
+    - ล้าง line_link_code และ line_link_code_expires_at ทันที
+    """
+    normalized_code = _normalize_line_code(code)
+    clean_line_user_id = str(line_user_id or "").strip()
+
+    if not normalized_code or not clean_line_user_id:
+        return None
+
+    with get_connection() as conn:
+        row = conn.execute(
+            """
+            SELECT id
+            FROM users
+            WHERE UPPER(line_link_code) = ?
+              AND line_link_code_expires_at > CURRENT_TIMESTAMP
+            LIMIT 1
+            """,
+            (normalized_code,),
+        ).fetchone()
+
+        if not row:
+            return None
+
+        user_id = int(row["id"])
+
+        conn.execute(
+            """
+            UPDATE users
+            SET line_user_id = ?,
+                line_notify_enabled = 1,
+                line_link_code = NULL,
+                line_link_code_expires_at = NULL
+            WHERE id = ?
+            """,
+            (clean_line_user_id, user_id),
+        )
+
+    return get_user_line_status(user_id)
 
 
 # ========================

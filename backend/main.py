@@ -14,15 +14,14 @@
 # - realtime session mode: ไม่กำหนดเวลาล่วงหน้า
 # - เวลาแจ้งเตือนเมื่อผิดท่าต่อเนื่องอยู่ใน config.py
 # - ส่งค่า timer/alert แยกคอยื่นและไหล่ห่อออกไปที่ /posture/current
-# - เพิ่มจำนวนแจ้งเตือนแยกตามสาเหตุ:
-#   forward_head_alert_count
-#   rounded_shoulder_alert_count
-#   alert_count
-# - เพิ่ม LINE webhook/status/test endpoint
+# - เพิ่มจำนวนแจ้งเตือนแยกตามสาเหตุ
+# - เพิ่ม LINE binding แบบ multi-user
+# - LINE notification ส่งตาม user_id เจ้าของ session ไม่ใช้ LINE_USER_ID global เป็นหลัก
 
 import json
 import sqlite3
 from contextlib import asynccontextmanager
+from typing import Optional
 
 from fastapi import FastAPI, Header, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -31,25 +30,26 @@ from fastapi.responses import Response
 import config
 import database as db
 import schemas
-from detector import PoseDetector
 from classifier import PostureClassifier, Status
-from state import CameraThread, SessionState
+from detector import PoseDetector
 from notification_service import (
+    create_line_link_code,
     get_line_notification_status,
     handle_line_webhook,
     send_test_line_notification,
     set_line_notification_enabled,
 )
+from state import CameraThread, SessionState
 
 
 # ========================
 # Lifespan — สร้าง/ทำลาย resource
 # ========================
 
-detector: PoseDetector = None
-classifier: PostureClassifier = None
-session_state: SessionState = None
-camera_thread: CameraThread = None
+detector: Optional[PoseDetector] = None
+classifier: Optional[PostureClassifier] = None
+session_state: Optional[SessionState] = None
+camera_thread: Optional[CameraThread] = None
 
 
 @asynccontextmanager
@@ -70,7 +70,6 @@ async def lifespan(app: FastAPI):
     """
     global detector, classifier, session_state, camera_thread
 
-    # Startup
     db.init_database()
 
     detector = PoseDetector()
@@ -87,7 +86,6 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    # Shutdown
     if camera_thread is not None:
         camera_thread.stop()
 
@@ -111,7 +109,6 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# เปิด CORS ให้ frontend เรียก API ได้ใน development mode
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -130,8 +127,8 @@ def health_check():
     """ตรวจสอบว่า backend ทำงานอยู่"""
     return schemas.HealthResponse(
         message="Posture detection backend is running",
-        camera_active=camera_thread.is_running(),
-        session_active=session_state.session_id is not None,
+        camera_active=bool(camera_thread and camera_thread.is_running()),
+        session_active=bool(session_state and session_state.session_id is not None),
     )
 
 
@@ -212,6 +209,12 @@ def login(payload: dict):
 @app.post("/camera/start", response_model=schemas.CameraStatusResponse)
 def start_camera():
     """เริ่มเปิดกล้องและเริ่ม thread ประมวลผล"""
+    if camera_thread is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Camera thread is not ready",
+        )
+
     success = camera_thread.start()
 
     if not success:
@@ -230,7 +233,8 @@ def start_camera():
 @app.post("/camera/stop", response_model=schemas.CameraStatusResponse)
 def stop_camera():
     """หยุดกล้อง"""
-    camera_thread.stop()
+    if camera_thread is not None:
+        camera_thread.stop()
 
     return schemas.CameraStatusResponse(
         success=True,
@@ -252,7 +256,7 @@ def get_current_posture():
     เพื่อเอาค่า CVA/FSA, สถานะ posture,
     timer แยกคอยื่น/ไหล่ห่อ และสถานะ alert ไปแสดงผล
     """
-    if not camera_thread.is_running():
+    if camera_thread is None or not camera_thread.is_running():
         return schemas.PostureResponse(
             status=schemas.PostureStatus.NO_PERSON_DETECTED,
             cva_angle=None,
@@ -274,7 +278,6 @@ def get_current_posture():
     classification = camera_thread.get_latest_classification()
     detection = camera_thread.get_latest_detection()
 
-    # ยังไม่มีผลเลย เช่น กล้องเพิ่งเปิดและยังไม่ process frame แรก
     if classification is None or detection is None:
         return schemas.PostureResponse(
             status=schemas.PostureStatus.NO_PERSON_DETECTED,
@@ -353,13 +356,8 @@ def get_current_posture():
 
 @app.get("/video/frame")
 def get_video_frame():
-    """
-    ส่ง JPEG frame ล่าสุดให้ frontend
-
-    frontend สามารถเรียก endpoint นี้ซ้ำ ๆ
-    เพื่อ refresh ภาพจากกล้อง
-    """
-    if not camera_thread.is_running():
+    """ส่ง JPEG frame ล่าสุดให้ frontend"""
+    if camera_thread is None or not camera_thread.is_running():
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Camera is not active",
@@ -394,6 +392,12 @@ def start_session(payload: dict):
         "planned_duration_minutes": 0
     }
     """
+    if session_state is None or classifier is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Session system is not ready",
+        )
+
     user_id = payload.get("user_id")
     planned = payload.get("planned_duration_minutes", 0)
 
@@ -401,6 +405,20 @@ def start_session(payload: dict):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="user_id is required",
+        )
+
+    try:
+        user_id = int(user_id)
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="user_id must be integer",
+        )
+
+    if db.get_user_by_id(user_id) is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
         )
 
     if session_state.session_id is not None:
@@ -414,7 +432,6 @@ def start_session(payload: dict):
         planned_minutes=planned,
     )
 
-    # reset temporal filter ให้เริ่มนับใหม่ทุก session
     classifier.reset()
 
     return {
@@ -427,6 +444,12 @@ def start_session(payload: dict):
 @app.post("/session/stop", response_model=schemas.SessionSummaryResponse)
 def stop_session():
     """จบ session และคืน summary"""
+    if session_state is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Session system is not ready",
+        )
+
     if session_state.session_id is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -444,6 +467,12 @@ def stop_session():
 @app.get("/session/summary", response_model=schemas.SessionSummaryResponse)
 def get_session_summary():
     """ดู summary ปัจจุบันของ session ที่กำลังทำงาน"""
+    if session_state is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Session system is not ready",
+        )
+
     summary = session_state.get_summary()
 
     return _summary_to_response(
@@ -483,15 +512,16 @@ def get_session_logs(session_id: int):
 # ========================
 
 @app.get("/notification/line/status", response_model=dict)
-def get_line_status():
+def get_line_status(user_id: Optional[int] = None):
     """
     ตรวจสอบสถานะ LINE Messaging API
 
-    ใช้สำหรับเช็คว่า backend อ่านค่า LINE จาก backend/.env ได้ครบหรือไม่
-    โดยไม่เปิดเผย channel access token / channel secret ออกไปใน response
+    Query:
+    - user_id=1  ดูสถานะ LINE ของ user นั้น
+    - ไม่ส่ง user_id จะคืนสถานะแบบ global fallback เพื่อรองรับ endpoint เดิม
     """
     try:
-        line_status = get_line_notification_status()
+        line_status = get_line_notification_status(user_id=user_id)
 
         return {
             "success": True,
@@ -500,7 +530,6 @@ def get_line_status():
         }
 
     except Exception as err:
-        # ห้ามให้ปัญหา LINE ทำให้ backend หลักล้ม
         return {
             "success": False,
             "line": None,
@@ -509,18 +538,123 @@ def get_line_status():
         }
 
 
+@app.post("/notification/line/link-code", response_model=dict)
+def create_line_binding_code(payload: dict):
+    """
+    สร้างรหัสผูกบัญชี LINE ให้ user ปัจจุบัน
+
+    payload:
+    {
+        "user_id": 1
+    }
+
+    Flow:
+    - frontend ส่ง user_id ที่ login อยู่มา
+    - backend สร้าง code เช่น PG-482913
+    - backend คืน line_open_url / qr_payload ให้ frontend เอาไปสร้าง QR
+    - user สแกน QR แล้วกดส่งรหัสใน LINE Official Account
+    - /line/webhook จะรับ source.userId แล้วบันทึกลง users.line_user_id
+    """
+    user_id = payload.get("user_id")
+
+    if user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="user_id is required",
+        )
+
+    try:
+        user_id = int(user_id)
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="user_id must be integer",
+        )
+
+    if db.get_user_by_id(user_id) is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+
+    try:
+        result = create_line_link_code(user_id=user_id)
+        line = result.get("line") or {}
+
+        return {
+            "success": bool(result.get("success")),
+            "line": line,
+            "line_link_code": result.get("line_link_code") or line.get("line_link_code"),
+            "line_link_code_expires_at": (
+                result.get("line_link_code_expires_at")
+                or line.get("line_link_code_expires_at")
+            ),
+            "line_open_url": result.get("line_open_url") or line.get("line_open_url"),
+            "qr_payload": result.get("qr_payload") or line.get("qr_payload"),
+            "message": result.get("message", "LINE link code created"),
+        }
+
+    except Exception as err:
+        return {
+            "success": False,
+            "line": None,
+            "line_link_code": None,
+            "line_link_code_expires_at": None,
+            "line_open_url": None,
+            "qr_payload": None,
+            "message": "Cannot create LINE link code",
+            "detail": str(err),
+        }
+
+
 @app.post("/notification/line/enabled", response_model=dict)
 def set_line_enabled(payload: dict):
-    """เปิด/ปิด LINE notification จาก Settings Panel หน้า Monitoring"""
+    """
+    เปิด/ปิด LINE notification
 
+    payload แบบใหม่:
+    {
+        "user_id": 1,
+        "enabled": true
+    }
+
+    payload แบบเก่า:
+    {
+        "enabled": true
+    }
+
+    ถ้ามี user_id จะเปิด/ปิดเฉพาะ user นั้น
+    ถ้าไม่มี user_id จะ fallback เป็นระบบ global เดิม
+    """
     if "enabled" not in payload or not isinstance(payload.get("enabled"), bool):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="enabled must be boolean",
         )
 
+    raw_user_id = payload.get("user_id")
+    user_id: Optional[int] = None
+
+    if raw_user_id is not None:
+        try:
+            user_id = int(raw_user_id)
+        except (TypeError, ValueError):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="user_id must be integer",
+            )
+
+        if db.get_user_by_id(user_id) is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found",
+            )
+
     try:
-        line_status = set_line_notification_enabled(payload["enabled"])
+        line_status = set_line_notification_enabled(
+            enabled=payload["enabled"],
+            user_id=user_id,
+        )
 
         return {
             "success": True,
@@ -529,7 +663,6 @@ def set_line_enabled(payload: dict):
         }
 
     except Exception as err:
-        # ห้ามให้ปัญหา LINE ทำให้ backend หลักล้ม
         return {
             "success": False,
             "line": None,
@@ -539,16 +672,39 @@ def set_line_enabled(payload: dict):
 
 
 @app.post("/notification/test-line", response_model=dict)
-def test_line_notification():
+def test_line_notification(payload: Optional[dict] = None):
     """
     ส่งข้อความทดสอบ LINE แบบ manual
 
-    endpoint นี้ใช้ force=True ภายใน notification_service
-    เพื่อทดสอบว่าส่ง push message ได้จริงหรือไม่
-    โดยไม่เกี่ยวกับ timer ของ classifier และไม่บันทึกเป็น posture alert
+    payload แบบใหม่:
+    {
+        "user_id": 1
+    }
+
+    ถ้ามี user_id จะส่งหา LINE ของ user นั้นเท่านั้น
+    ถ้าไม่มี user_id จะ fallback endpoint เดิม
     """
+    payload = payload or {}
+    raw_user_id = payload.get("user_id")
+    user_id: Optional[int] = None
+
+    if raw_user_id is not None:
+        try:
+            user_id = int(raw_user_id)
+        except (TypeError, ValueError):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="user_id must be integer",
+            )
+
+        if db.get_user_by_id(user_id) is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found",
+            )
+
     try:
-        result = send_test_line_notification()
+        result = send_test_line_notification(user_id=user_id)
 
         return {
             "success": bool(result.get("success")),
@@ -557,7 +713,6 @@ def test_line_notification():
         }
 
     except Exception as err:
-        # LINE ล้มเหลวต้องไม่ทำให้ browser/backend crash
         return {
             "success": False,
             "result": None,
@@ -576,12 +731,10 @@ async def line_webhook(
 
     ใช้สำหรับ:
     - ตรวจสอบ signature จาก LINE ถ้า LINE_VERIFY_WEBHOOK_SIGNATURE=true
-    - ดึง source.userId จาก event
-    - บันทึก LINE_USER_ID ลง backend/.env อัตโนมัติ
-
-    หมายเหตุ:
-    - ต้องใช้ raw body เดิมในการตรวจ signature
-    - ถ้า LINE webhook ผิดพลาด จะตอบ error แบบควบคุมได้ ไม่ปล่อยให้ backend crash
+    - อ่านข้อความที่ผู้ใช้ส่งเข้ามา
+    - ถ้าข้อความตรงกับ users.line_link_code ที่ยังไม่หมดอายุ
+      จะบันทึก source.userId ลง users.line_user_id ของ user นั้น
+    - ตอบกลับ LINE ว่าผูกบัญชีสำเร็จ หรือรหัสผิด/หมดอายุ
     """
     raw_body = await request.body()
 
@@ -605,12 +758,11 @@ async def line_webhook(
             verify_signature=verify_signature,
         )
     except Exception as err:
-        # กันไม่ให้ webhook ทำ backend หลัก crash
         return {
             "success": False,
             "signature_valid": None,
-            "user_ids": [],
-            "saved_user_id": None,
+            "events_processed": 0,
+            "linked_users": [],
             "message": "LINE webhook handling failed",
             "detail": str(err),
         }
