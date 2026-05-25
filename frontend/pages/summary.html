@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>สรุปผล · PostureGuard</title>
+    <title>สรุปผลการใช้งาน · PostureGuard AI</title>
 
     <link rel="stylesheet" href="../css/base.css">
     <link rel="stylesheet" href="../css/layout.css">
@@ -17,170 +17,205 @@
     <div id="header"></div>
 
     <main class="dashboard summary-dashboard">
-        <section class="summary-page summary-compact">
+        <section class="summary-page summary-page-clean" aria-labelledby="summaryTitle">
 
-            <header class="summary-topbar">
-                <div>
-                    <h2 class="summary-title">สรุปผลการใช้งาน</h2>
-                    <p class="summary-subtitle" id="summaryDate">—</p>
+            <!-- HERO: เหลือเฉพาะหัวข้อ + action หลัก -->
+            <header class="summary-hero summary-hero-clean">
+                <div class="summary-hero-text">
+                    <span class="summary-kicker">Session Summary</span>
+
+                    <h1 class="summary-title" id="summaryTitle">
+                        สรุปผลการใช้งาน
+                    </h1>
+
+                    <p class="summary-meta" id="summaryMeta">
+                        กำลังโหลดข้อมูล session ล่าสุด...
+                    </p>
                 </div>
 
-                <div class="summary-actions-top">
-                    <a href="setup.html" class="summary-primary-btn">เริ่มใหม่</a>
+                <div class="summary-actions" aria-label="การทำงานหลัก">
+                    <a class="summary-btn summary-btn-primary" id="startNewSessionBtn" href="setup.html">
+                        เริ่มตรวจใหม่
+                    </a>
                 </div>
             </header>
 
-            <div class="summary-layout">
+            <!-- LOADING / EMPTY / ERROR STATE -->
+            <section class="summary-state" id="summaryState" aria-live="polite">
+                <div class="summary-state-card">
+                    <strong id="summaryStateTitle">กำลังโหลดข้อมูล</strong>
+                    <p id="summaryStateMessage">
+                        ระบบกำลังดึงข้อมูลสรุปล่าสุดจาก session ของคุณ
+                    </p>
+                </div>
+            </section>
 
-                <!-- LEFT -->
-                <section class="summary-left">
+            <!-- CONTENT -->
+            <section class="summary-content summary-content-clean" id="summaryContent" hidden>
 
-                    <div class="score-card compact-card">
-                        <div class="score-circle-wrap">
-                            <svg class="score-circle" viewBox="0 0 120 120">
-                                <circle class="score-bg" cx="60" cy="60" r="52"></circle>
-                                <circle
-                                    class="score-fg"
-                                    id="scoreCircleFg"
-                                    cx="60"
-                                    cy="60"
-                                    r="52"
-                                    stroke-dasharray="326.7"
-                                    stroke-dashoffset="326.7">
-                                </circle>
+                <!-- RESULT OVERVIEW -->
+                <section class="summary-result-grid" aria-label="ผลสรุปหลัก">
+
+                    <!-- SCORE + MAIN INSIGHT รวมไว้ด้วยกัน -->
+                    <article class="summary-card score-card score-card-clean">
+                        <div class="score-ring" aria-label="Posture Score">
+                            <svg class="score-svg" viewBox="0 0 120 120" role="img">
+                                <circle class="score-track" cx="60" cy="60" r="52"></circle>
+                                <circle class="score-progress" id="scoreProgress" cx="60" cy="60" r="52"></circle>
                             </svg>
 
-                            <div class="score-text">
-                                <span class="score-value" id="scoreValue">0</span>
-                                <span class="score-label">คะแนน</span>
+                            <div class="score-center">
+                                <strong id="scoreValue">—</strong>
+                                <span>คะแนน</span>
                             </div>
                         </div>
 
-                        <div class="score-info">
-                            <span class="section-eyebrow">Posture Score</span>
-                            <h3 class="score-grade" id="scoreGrade">กำลังประมวลผล</h3>
-                            <p class="score-message" id="scoreMessage">
-                                ระบบกำลังวิเคราะห์ข้อมูลท่าทางจากการใช้งาน
+                        <div class="score-detail">
+                            <span class="summary-section-label">ผลสรุปรอบนี้</span>
+
+                            <h2 id="scoreTitle">
+                                กำลังวิเคราะห์
+                            </h2>
+
+                            <p id="scoreDescription">
+                                ระบบกำลังคำนวณคะแนนจากข้อมูล session ล่าสุด
                             </p>
 
-                            <div class="risk-pill" id="riskPill">
-                                <span>ระดับความเสี่ยง</span>
-                                <strong id="sumRisk">—</strong>
+                            <div class="summary-status-pill" id="overallStatusPill">
+                                <span>สถานะ</span>
+                                <strong id="overallStatus">—</strong>
+                            </div>
+
+                            <div class="main-insight main-insight-inline">
+                                <span class="insight-icon" id="mainIssueIcon">✓</span>
+
+                                <div>
+                                    <strong id="mainIssueTitle">
+                                        กำลังวิเคราะห์
+                                    </strong>
+
+                                    <p id="mainIssueDescription">
+                                        ระบบกำลังประมวลผลข้อมูลจาก session ล่าสุด
+                                    </p>
+                                </div>
                             </div>
                         </div>
+                    </article>
+
+                    <!-- KPI เหลือเฉพาะที่ user สนใจจริง -->
+                    <div class="summary-kpi-grid summary-kpi-grid-clean" aria-label="ข้อมูลสำคัญ">
+                        <article class="summary-kpi-card">
+                            <span class="kpi-label">เวลาที่ตรวจพบผู้ใช้</span>
+                            <strong class="kpi-value" id="effectiveTimeValue">—</strong>
+                            <small>เวลาที่ใช้คำนวณผลจริง</small>
+                        </article>
+
+                        <article class="summary-kpi-card is-alert">
+                            <span class="kpi-label">แจ้งเตือนรวม</span>
+                            <strong class="kpi-value" id="alertCountValue">—</strong>
+                            <small>คอยื่นและไหล่ห่อรวมกัน</small>
+                        </article>
+
+                        <article class="summary-kpi-card is-good">
+                            <span class="kpi-label">ท่านั่งปกติ</span>
+                            <strong class="kpi-value" id="goodPercentValue">—</strong>
+                            <small id="goodTimeValue">—</small>
+                        </article>
                     </div>
-
-                    <div class="overview-grid">
-                        <div class="overview-card">
-                            <span class="overview-label">เวลาที่ใช้งาน</span>
-                            <strong class="overview-value" id="sumEffective">—</strong>
-                        </div>
-
-                        <div class="overview-card">
-                            <span class="overview-label">สัดส่วนท่าทางผิด</span>
-                            <strong class="overview-value" id="sumIssueRatio">—</strong>
-                        </div>
-
-                        <div class="overview-card">
-                            <span class="overview-label">จำนวนแจ้งเตือนรวม</span>
-                            <strong class="overview-value" id="sumAlerts">—</strong>
-                        </div>
-
-                        <div class="overview-card">
-                            <span class="overview-label">แจ้งเตือนคอยื่น</span>
-                            <strong class="overview-value" id="sumForwardAlerts">—</strong>
-                        </div>
-
-                        <div class="overview-card">
-                            <span class="overview-label">แจ้งเตือนไหล่ห่อ</span>
-                            <strong class="overview-value" id="sumRoundedAlerts">—</strong>
-                        </div>
-                    </div>
-
                 </section>
 
-                <!-- RIGHT -->
-                <section class="summary-right">
+                <!-- DETAILS: ลดข้อมูลซ้ำ เหลือปัญหาที่ต้องแก้ -->
+                <section class="summary-detail-grid summary-detail-grid-clean" aria-label="รายละเอียดและคำแนะนำ">
 
-                    <div class="compact-card analysis-card">
-                        <div class="card-heading">
-                            <h3 class="card-title">การวิเคราะห์ท่าทาง</h3>
-                            <p class="card-desc">คำนวณจากเวลาที่ระบบตรวจพบผู้ใช้งานจริง</p>
-                        </div>
-
-                        <div class="analysis-list">
-                            <div class="analysis-row good">
-                                <div class="analysis-meta">
-                                    <span class="analysis-label">ท่าทางปกติ</span>
-                                    <span class="analysis-time" id="sumGood">—</span>
-                                </div>
-
-                                <div class="analysis-progress">
-                                    <div class="analysis-bar" id="goodBar"></div>
-                                </div>
-
-                                <strong class="analysis-percent" id="sumGoodPct">—</strong>
-                            </div>
-
-                            <div class="analysis-row forward">
-                                <div class="analysis-meta">
-                                    <span class="analysis-label">คอยื่น</span>
-                                    <span class="analysis-time">
-                                        แจ้งเตือน <span id="sumForwardAlertCount">0 ครั้ง</span>
-                                    </span>
-                                </div>
-
-                                <div class="analysis-progress">
-                                    <div class="analysis-bar" id="forwardBar"></div>
-                                </div>
-
-                                <strong class="analysis-percent" id="sumForwardPct">—</strong>
-                            </div>
-
-                            <div class="analysis-row rounded">
-                                <div class="analysis-meta">
-                                    <span class="analysis-label">ไหล่ห่อ</span>
-                                    <span class="analysis-time">
-                                        แจ้งเตือน <span id="sumRoundedAlertCount">0 ครั้ง</span>
-                                    </span>
-                                </div>
-
-                                <div class="analysis-progress">
-                                    <div class="analysis-bar" id="roundedBar"></div>
-                                </div>
-
-                                <strong class="analysis-percent" id="sumRoundedPct">—</strong>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="compact-card insight-card">
-                        <div class="card-heading">
-                            <h3 class="card-title">สรุปพฤติกรรมหลัก</h3>
-                        </div>
-
-                        <div class="insight-box">
-                            <div class="insight-marker"></div>
+                    <!-- ISSUES -->
+                    <article class="summary-card posture-card">
+                        <div class="summary-card-head">
                             <div>
-                                <strong id="mainIssueTitle">กำลังวิเคราะห์</strong>
-                                <p id="mainIssueDesc">ระบบกำลังประมวลผลข้อมูลจาก session นี้</p>
+                                <span class="summary-section-label">Issues Found</span>
+                                <h2>ปัญหาที่พบ</h2>
+                            </div>
+
+                            <span class="summary-chip" id="riskLevelChip">
+                                —
+                            </span>
+                        </div>
+
+                        <div class="posture-bars posture-bars-clean">
+                            <div class="posture-row is-forward">
+                                <div class="posture-row-head">
+                                    <span>คอยื่น</span>
+                                    <strong id="forwardBarText">—</strong>
+                                </div>
+
+                                <div class="summary-progress" aria-hidden="true">
+                                    <span id="forwardBar"></span>
+                                </div>
+
+                                <small id="forwardBarSubtext">—</small>
+                            </div>
+
+                            <div class="posture-row is-rounded">
+                                <div class="posture-row-head">
+                                    <span>ไหล่ห่อ</span>
+                                    <strong id="roundedBarText">—</strong>
+                                </div>
+
+                                <div class="summary-progress" aria-hidden="true">
+                                    <span id="roundedBar"></span>
+                                </div>
+
+                                <small id="roundedBarSubtext">—</small>
                             </div>
                         </div>
-                    </div>
 
-                    <div class="compact-card recommendation-card">
-                        <div class="card-heading">
-                            <h3 class="card-title">คำแนะนำหลังใช้งาน</h3>
+                        <!-- ซ่อนไว้ให้ summary.js เดิมยัง set ค่าได้ ไม่ทำให้ error -->
+                        <div class="summary-hidden-compat" hidden>
+                            <span id="totalTimeValue">—</span>
+                            <span id="goodBarText">—</span>
+                            <span id="goodBarSubtext">—</span>
+                            <span id="forwardTimeValue">—</span>
+                            <span id="forwardAlertValue">—</span>
+                            <span id="roundedTimeValue">—</span>
+                            <span id="roundedAlertValue">—</span>
+                            <span id="goodBar"></span>
+                        </div>
+                    </article>
+
+                    <!-- RECOMMENDATION -->
+                    <article class="summary-card recommendation-card">
+                        <div class="summary-card-head">
+                            <div>
+                                <span class="summary-section-label">Recommendation</span>
+                                <h2>ควรทำอะไรต่อ</h2>
+                            </div>
                         </div>
 
-                        <ul class="rec-list" id="recList">
-                            <li>กำลังประมวลผล...</li>
+                        <ul class="recommendation-list" id="recommendationList">
+                            <li>กำลังโหลดคำแนะนำ...</li>
                         </ul>
-                    </div>
+                    </article>
 
+                    <!-- RECENT SESSIONS -->
+                    <article class="summary-card recent-card">
+                        <div class="summary-card-head">
+                            <div>
+                                <span class="summary-section-label">Recent Sessions</span>
+                                <h2>รายการล่าสุด</h2>
+                            </div>
+
+                            <a class="summary-inline-link" href="history.html">
+                                ดูทั้งหมด
+                            </a>
+                        </div>
+
+                        <div class="recent-session-list" id="recentSessionList">
+                            <div class="recent-empty">
+                                กำลังโหลดรายการล่าสุด...
+                            </div>
+                        </div>
+                    </article>
                 </section>
-
-            </div>
+            </section>
         </section>
     </main>
 

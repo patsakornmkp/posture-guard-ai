@@ -729,3 +729,208 @@ def get_session_alerts(session_id: int) -> list[dict]:
         ).fetchall()
 
         return [dict(row) for row in rows]
+
+# ========================
+# Summary helpers
+# ========================
+
+def _parse_session_datetime(value):
+    """แปลง datetime จาก SQLite ให้ปลอดภัยกับ format เก่า/ใหม่"""
+    if not value:
+        return None
+
+    if isinstance(value, datetime):
+        return value
+
+    text = str(value).strip()
+
+    for fmt in (
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M:%S.%f",
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%dT%H:%M:%S.%f",
+    ):
+        try:
+            return datetime.strptime(text, fmt)
+        except ValueError:
+            continue
+
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00")).replace(tzinfo=None)
+    except ValueError:
+        return None
+
+
+def _safe_float(value, default: float = 0.0) -> float:
+    try:
+        if value is None or value == "":
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_int(value, default: int = 0) -> int:
+    try:
+        if value is None or value == "":
+            return default
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _seconds_between(start_value, end_value) -> float:
+    start_dt = _parse_session_datetime(start_value)
+    end_dt = _parse_session_datetime(end_value) or datetime.utcnow()
+
+    if not start_dt:
+        return 0.0
+
+    return max((end_dt - start_dt).total_seconds(), 0.0)
+
+
+def _session_row_to_summary(row) -> dict:
+    """
+    แปลง row จากตาราง sessions เป็น summary ที่ frontend ใช้ได้ทันที
+
+    ไม่สร้าง mock data:
+    - ถ้าเวลาที่ตรวจพบผู้ใช้เป็น 0 จะคืน 0 ให้ frontend แสดง fallback อย่างปลอดภัย
+    - ถ้า session ยังไม่จบ end_time จะคำนวณเวลาถึงปัจจุบัน แต่ยังบอก completed=False
+    """
+    data = dict(row)
+
+    actual_seconds = _seconds_between(
+        data.get("start_time"),
+        data.get("end_time"),
+    )
+
+    good_seconds = _safe_float(data.get("good_seconds"))
+    bad_seconds = _safe_float(data.get("bad_seconds"))
+    effective_seconds = _safe_float(data.get("effective_seated_seconds"))
+
+    forward_seconds = _safe_float(data.get("forward_head_seconds"))
+    rounded_seconds = _safe_float(data.get("rounded_shoulder_seconds"))
+
+    forward_alerts = _safe_int(data.get("forward_head_alert_count"))
+    rounded_alerts = _safe_int(data.get("rounded_shoulder_alert_count"))
+    alert_count = max(
+        _safe_int(data.get("alert_count")),
+        forward_alerts + rounded_alerts,
+    )
+
+    issue_seconds = max(
+        forward_seconds + rounded_seconds,
+        bad_seconds,
+        0.0,
+    )
+
+    bad_ratio = (
+        issue_seconds / effective_seconds
+        if effective_seconds > 0
+        else 0.0
+    )
+
+    good_ratio = (
+        good_seconds / effective_seconds
+        if effective_seconds > 0
+        else 0.0
+    )
+
+    return {
+        "session_id": data.get("id"),
+        "user_id": data.get("user_id"),
+        "start_time": data.get("start_time"),
+        "end_time": data.get("end_time"),
+        "completed": data.get("end_time") is not None,
+
+        "planned_duration_minutes": data.get("planned_duration_min"),
+        "actual_duration_seconds": round(actual_seconds, 1),
+        "effective_seated_seconds": round(effective_seconds, 1),
+
+        "good_posture_seconds": round(good_seconds, 1),
+        "bad_posture_seconds": round(bad_seconds, 1),
+        "forward_head_seconds": round(forward_seconds, 1),
+        "rounded_shoulder_seconds": round(rounded_seconds, 1),
+
+        "alert_count": alert_count,
+        "forward_head_alert_count": forward_alerts,
+        "rounded_shoulder_alert_count": rounded_alerts,
+
+        "bad_posture_ratio": round(bad_ratio, 3),
+        "good_posture_ratio": round(good_ratio, 3),
+        "risk_level": data.get("risk_level") or "low",
+    }
+
+
+def get_latest_summary_session(
+    user_id: int,
+    session_id: Optional[int] = None,
+) -> Optional[dict]:
+    """
+    ดึง summary session ล่าสุดจาก SQLite
+
+    - ถ้าส่ง session_id จะดึง session นั้นของ user
+    - ถ้าไม่ส่ง จะดึง session ที่จบล่าสุดก่อน
+    - ถ้ายังไม่มี session ที่จบ จะ fallback เป็น session ล่าสุดของ user
+    """
+    with get_connection() as conn:
+        if session_id is not None:
+            row = conn.execute(
+                """
+                SELECT *
+                FROM sessions
+                WHERE id = ?
+                  AND user_id = ?
+                LIMIT 1
+                """,
+                (session_id, user_id),
+            ).fetchone()
+
+            return _session_row_to_summary(row) if row else None
+
+        row = conn.execute(
+            """
+            SELECT *
+            FROM sessions
+            WHERE user_id = ?
+              AND end_time IS NOT NULL
+            ORDER BY end_time DESC, start_time DESC, id DESC
+            LIMIT 1
+            """,
+            (user_id,),
+        ).fetchone()
+
+        if row:
+            return _session_row_to_summary(row)
+
+        row = conn.execute(
+            """
+            SELECT *
+            FROM sessions
+            WHERE user_id = ?
+            ORDER BY start_time DESC, id DESC
+            LIMIT 1
+            """,
+            (user_id,),
+        ).fetchone()
+
+        return _session_row_to_summary(row) if row else None
+
+
+def get_recent_summary_sessions(user_id: int, limit: int = 5) -> list[dict]:
+    """ดึงรายการ session ล่าสุดสำหรับแสดงในหน้า Summary"""
+    safe_limit = max(1, min(int(limit or 5), 20))
+
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT *
+            FROM sessions
+            WHERE user_id = ?
+            ORDER BY start_time DESC, id DESC
+            LIMIT ?
+            """,
+            (user_id, safe_limit),
+        ).fetchall()
+
+        return [_session_row_to_summary(row) for row in rows]

@@ -12,6 +12,7 @@
    - Summary เป็น popover ข้างปุ่มตั้งค่า
    - Settings เป็น popover ขนาดจำกัด ไม่ล้นจอ
    - Browser notification ไม่เด้งบัง UI ตอนผู้ใช้เปิดหน้าเว็บอยู่
+   - หลังหยุด session จะ cache summary แล้ว redirect ไป summary.html
 ========================================= */
 
 (function () {
@@ -646,7 +647,6 @@
         setText("notifyDesc", "ยังไม่อนุญาต");
         return false;
     }
-
     async function setupLineToggle() {
         const toggle = $("lineToggleBtn");
         const desc = $("lineDesc");
@@ -725,7 +725,11 @@
                     renderLineStatus(status);
 
                     const code = result?.line_link_code || status?.line_link_code;
-                    const qrPayload = result?.qr_payload || result?.line_open_url || status?.qr_payload || status?.line_open_url;
+                    const qrPayload =
+                        result?.qr_payload ||
+                        result?.line_open_url ||
+                        status?.qr_payload ||
+                        status?.line_open_url;
 
                     renderLineQr({
                         code,
@@ -796,6 +800,10 @@
     }
 
     function getCurrentUserId() {
+        if (utils.getCurrentUserId) {
+            return utils.getCurrentUserId();
+        }
+
         const user = utils.getCurrentUser ? utils.getCurrentUser() : null;
 
         if (!user) {
@@ -850,14 +858,20 @@
             status.can_create_link_code === true ||
             status.has_line_official_account_id === true;
 
-        const isLinked = status.is_linked === true || status.has_line_user_id === true;
-        const enabled = status.line_notify_enabled === true || status.line_enabled === true;
+        const isLinked =
+            status.is_linked === true ||
+            status.has_line_user_id === true;
+
+        const enabled =
+            status.line_notify_enabled === true ||
+            status.line_enabled === true;
 
         toggle.checked = isLinked && enabled;
         toggle.disabled = !systemReady || !isLinked;
 
         if (!systemReady) {
             desc.textContent = "ระบบยังไม่พร้อม";
+
             setText(
                 "lineStatusText",
                 "ยังไม่สามารถใช้งาน LINE ได้ในขณะนี้ กรุณาติดต่อผู้ดูแลระบบ"
@@ -880,6 +894,7 @@
 
         if (!canCreateLinkCode && !isLinked) {
             desc.textContent = "ระบบยังไม่พร้อม";
+
             setText(
                 "lineStatusText",
                 "ยังไม่สามารถใช้งาน LINE ได้ในขณะนี้ กรุณาติดต่อผู้ดูแลระบบ"
@@ -902,6 +917,7 @@
 
         if (!isLinked) {
             desc.textContent = "ยังไม่ได้ผูก";
+
             setText("lineStatusText", "ยังไม่ได้ผูกบัญชี LINE");
             setText(
                 "lineHelpText",
@@ -932,6 +948,7 @@
         }
 
         desc.textContent = enabled ? "เปิดอยู่" : "ปิดอยู่";
+
         setText("lineStatusText", "ผูกบัญชี LINE แล้ว");
         setText(
             "lineHelpText",
@@ -939,7 +956,11 @@
                 ? "ระบบจะส่งแจ้งเตือน LINE เมื่อเกิด alert ตามเงื่อนไข"
                 : "เปิด toggle เพื่อรับแจ้งเตือนผ่าน LINE"
         );
-        setLinePill(enabled ? "เปิดใช้งาน" : "ปิดอยู่", enabled ? "is-success" : "is-muted");
+
+        setLinePill(
+            enabled ? "เปิดใช้งาน" : "ปิดอยู่",
+            enabled ? "is-success" : "is-muted"
+        );
 
         if (linkBtn) {
             linkBtn.disabled = false;
@@ -1005,7 +1026,7 @@
 
         if (note) {
             note.textContent = expiresAt
-                ? `รหัสนี้มีเวลาจำกัด หากหมดอายุให้กดผูกบัญชี LINE ใหม่`
+                ? "รหัสนี้มีเวลาจำกัด หากหมดอายุให้กดผูกบัญชี LINE ใหม่"
                 : "หลังจากเปิด LINE แล้ว ให้กดส่งรหัสที่ระบบเตรียมไว้ในช่องแชต";
         }
 
@@ -1100,6 +1121,17 @@
     }
 
     async function fetchLineStatus() {
+        if (api.getLineStatus) {
+            const data = await api.getLineStatus(getCurrentUserId());
+            const status = normalizeLineStatusResponse(data);
+
+            if (!status) {
+                throw new Error("LINE status response is empty");
+            }
+
+            return status;
+        }
+
         const userId = getCurrentUserId();
         const query = userId ? `?user_id=${encodeURIComponent(userId)}` : "";
 
@@ -1139,6 +1171,10 @@
             throw new Error("ไม่พบข้อมูลผู้ใช้ที่เข้าสู่ระบบ");
         }
 
+        if (api.createLineLinkCode) {
+            return api.createLineLinkCode(userId);
+        }
+
         const response = await fetch(`${utils.API_BASE}/notification/line/link-code`, {
             method: "POST",
             headers: {
@@ -1165,6 +1201,18 @@
 
     async function setLineEnabled(enabled) {
         const userId = getCurrentUserId();
+
+        if (api.setLineEnabled) {
+            const data = await api.setLineEnabled(userId, enabled);
+            const status = normalizeLineStatusResponse(data);
+
+            if (!status) {
+                throw new Error("LINE enabled response is empty");
+            }
+
+            return status;
+        }
+
         const body = userId
             ? { user_id: userId, enabled }
             : { enabled };
@@ -1204,6 +1252,10 @@
 
         if (!userId) {
             throw new Error("ไม่พบข้อมูลผู้ใช้ที่เข้าสู่ระบบ");
+        }
+
+        if (api.testLineNotification) {
+            return api.testLineNotification(userId);
         }
 
         const response = await fetch(`${utils.API_BASE}/notification/test-line`, {
@@ -1264,6 +1316,7 @@
     /* =========================
        Polling
     ========================= */
+
     function startPolling() {
         if (videoInterval || pollInterval || elapsedInterval) {
             return;
@@ -1405,10 +1458,9 @@
 
         setText("elapsedTime", formatTime(displayedElapsedSeconds));
     }
-
     /* =========================
-       Render
-    ========================= */
+   Render
+========================= */
 
     function renderConnectionError() {
         const cameraStatus = $("cameraStatus");

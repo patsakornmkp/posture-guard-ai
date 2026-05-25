@@ -7,7 +7,8 @@
    - ต้องโหลดก่อน JS เฉพาะหน้าเสมอ
    - ไม่มี Calibration / Baseline
    - realtime mode ใช้ planned_duration_minutes = 0
-   - เพิ่ม API helper สำหรับ LINE multi-user binding
+   - รองรับ Summary API
+   - รองรับ LINE multi-user binding
 ========================================= */
 
 (function () {
@@ -17,9 +18,13 @@
     window.__postureGuardLoaded = true;
 
     const API_BASE =
-        window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
-            ? "http://127.0.0.1:8000"
-            : `http://${window.location.hostname}:8000`;
+        window.POSTUREGUARD_API_BASE ||
+        (
+            window.location.hostname === "localhost" ||
+            window.location.hostname === "127.0.0.1"
+                ? "http://127.0.0.1:8000"
+                : `http://${window.location.hostname}:8000`
+        );
 
     const STORAGE_KEYS = {
         currentUser: "currentUser",
@@ -77,6 +82,19 @@
         return data;
     }
 
+    function buildQuery(params = {}) {
+        const query = new URLSearchParams();
+
+        Object.entries(params).forEach(([key, value]) => {
+            if (value !== null && value !== undefined && value !== "") {
+                query.set(key, String(value));
+            }
+        });
+
+        const text = query.toString();
+        return text ? `?${text}` : "";
+    }
+
     window.api = {
         register(username, password, fullName = "") {
             return apiRequest("POST", "/auth/register", {
@@ -132,6 +150,27 @@
             return apiRequest("GET", `/history/session/${sessionId}/logs`);
         },
 
+        getSummary(userId, options = {}) {
+            return apiRequest(
+                "GET",
+                "/api/summary" + buildQuery({
+                    user_id: userId,
+                    session_id: options.sessionId,
+                    recent_limit: options.recentLimit ?? 5,
+                })
+            );
+        },
+
+        getRecentSessions(userId, limit = 5) {
+            return apiRequest(
+                "GET",
+                "/api/sessions/recent" + buildQuery({
+                    user_id: userId,
+                    limit,
+                })
+            );
+        },
+
         videoFrameUrl() {
             return `${API_BASE}/video/frame?t=${Date.now()}`;
         },
@@ -141,7 +180,10 @@
         ========================= */
 
         getLineStatus(userId = null) {
-            const query = userId ? `?user_id=${encodeURIComponent(userId)}` : "";
+            const query = buildQuery({
+                user_id: userId,
+            });
+
             return apiRequest("GET", `/notification/line/status${query}`);
         },
 
@@ -224,10 +266,18 @@
         return Boolean(getCurrentUser());
     }
 
+    function getCurrentSessionId() {
+        return localStorage.getItem(STORAGE_KEYS.currentSessionId);
+    }
+
+    function getLastSessionId() {
+        return localStorage.getItem(STORAGE_KEYS.lastSessionId);
+    }
+
     function isMonitoringSessionActive() {
         return (
             localStorage.getItem(STORAGE_KEYS.monitoringSessionActive) === "true" ||
-            Boolean(localStorage.getItem(STORAGE_KEYS.currentSessionId))
+            Boolean(getCurrentSessionId())
         );
     }
 
@@ -238,11 +288,13 @@
 
         localStorage.setItem(STORAGE_KEYS.monitoringSessionActive, "true");
         localStorage.setItem(STORAGE_KEYS.plannedMinutes, "0");
+
+        localStorage.removeItem(STORAGE_KEYS.lastSessionId);
         localStorage.removeItem(STORAGE_KEYS.lastSessionSummary);
     }
 
     function markMonitoringSessionStopped(summary = null) {
-        const sessionId = localStorage.getItem(STORAGE_KEYS.currentSessionId);
+        const sessionId = getCurrentSessionId();
 
         if (sessionId) {
             localStorage.setItem(STORAGE_KEYS.lastSessionId, sessionId);
@@ -250,7 +302,10 @@
 
         if (summary) {
             try {
-                localStorage.setItem(STORAGE_KEYS.lastSessionSummary, JSON.stringify(summary));
+                localStorage.setItem(
+                    STORAGE_KEYS.lastSessionSummary,
+                    JSON.stringify(summary)
+                );
             } catch (err) {
                 console.warn("Cannot cache last session summary:", err);
             }
@@ -386,7 +441,7 @@
             return true;
         }
 
-        if (getLastSessionSummary() || localStorage.getItem(STORAGE_KEYS.lastSessionId)) {
+        if (getLastSessionSummary() || getLastSessionId()) {
             redirectTo("summary.html", { replace: true });
         } else {
             redirectTo("setup.html", { replace: true });
@@ -478,6 +533,9 @@
         getCurrentUser,
         getCurrentUserId,
         isAuthenticated,
+
+        getCurrentSessionId,
+        getLastSessionId,
 
         isMonitoringSessionActive,
         markMonitoringSessionStarted,
