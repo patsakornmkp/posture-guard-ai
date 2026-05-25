@@ -84,16 +84,16 @@ CAMERA_FORWARD_DIRECTION: int = 1
 # CVA = Craniovertebral Angle
 #
 # เกณฑ์ใหม่:
-# - ปกติ    : CVA >= 43 องศา
-# - อันตราย : CVA < 43 องศา
+# - ปกติ    : CVA >= 45 องศา
+# - อันตราย : CVA < 45 องศา
 #
 # ไม่มีระดับเฝ้าระวังแล้ว
 
-FORWARD_HEAD_GOOD_THRESHOLD: float = 43.0
+FORWARD_HEAD_GOOD_THRESHOLD: float = 45.0
 
 # เก็บไว้เพื่อรองรับโค้ดเดิม แต่ใช้ค่าเดียวกับ GOOD_THRESHOLD
-FORWARD_HEAD_BAD_THRESHOLD: float = 43.0
-FORWARD_HEAD_SEVERE_THRESHOLD: float = 43.0
+FORWARD_HEAD_BAD_THRESHOLD: float = 45.0
+FORWARD_HEAD_SEVERE_THRESHOLD: float = 45.0
 
 
 # ========================
@@ -103,16 +103,16 @@ FORWARD_HEAD_SEVERE_THRESHOLD: float = 43.0
 # FSA = Forward Shoulder Angle
 #
 # เกณฑ์ใหม่:
-# - ปกติ    : FSA >= 54 องศา
-# - อันตราย : FSA < 54 องศา
+# - ปกติ    : FSA >= 52 องศา
+# - อันตราย : FSA < 52 องศา
 #
 # ไม่มีระดับเฝ้าระวังแล้ว
 
-ROUNDED_SHOULDER_GOOD_THRESHOLD: float = 54.0
+ROUNDED_SHOULDER_GOOD_THRESHOLD: float = 52.0
 
 # เก็บไว้เพื่อรองรับโค้ดเดิม แต่ใช้ค่าเดียวกับ GOOD_THRESHOLD
-ROUNDED_SHOULDER_BAD_THRESHOLD: float = 54.0
-ROUNDED_SHOULDER_SEVERE_THRESHOLD: float = 54.0
+ROUNDED_SHOULDER_BAD_THRESHOLD: float = 52.0
+ROUNDED_SHOULDER_SEVERE_THRESHOLD: float = 52.0
 
 
 # ========================
