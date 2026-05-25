@@ -11,7 +11,8 @@
    - ไม่มี stats modal / stats button
    - Summary เป็น popover ข้างปุ่มตั้งค่า
    - Settings เป็น popover ขนาดจำกัด ไม่ล้นจอ
-   - Browser notification ไม่เด้งบัง UI ตอนผู้ใช้เปิดหน้าเว็บอยู่
+   - Browser Notification แสดงตาม alert จาก backend
+   - เสียงแจ้งเตือนให้ backend เป็นตัวคุมรอบเวลา
    - หลังหยุด session จะ cache summary แล้ว redirect ไป summary.html
 ========================================= */
 
@@ -43,7 +44,14 @@
     const VIDEO_FRAME_INTERVAL = 700;
     const POSTURE_POLL_INTERVAL = 1500;
     const ELAPSED_INTERVAL = 1000;
-    const FRONTEND_ALERT_COOLDOWN = 45000;
+
+    // สำคัญ:
+    // backend เป็นตัวคุมว่า alert ควรเกิดทุกกี่วินาที
+    // frontend ควรมี cooldown สั้น ๆ แค่กันการยิงซ้ำจาก polling ถี่เกินไป
+    // ตอนทดสอบ backend = 10 วิ ใช้ค่านี้ได้
+    // ตอนใช้งานจริง backend = 180 วิ ก็ยังใช้ค่านี้ได้
+    const FRONTEND_ALERT_COOLDOWN = 2500;
+
     const CONNECTION_ERROR_VISIBLE_LIMIT = 1;
 
     const CVA_NORMAL_THRESHOLD = 43;
@@ -647,7 +655,7 @@
         setText("notifyDesc", "ยังไม่อนุญาต");
         return false;
     }
-    async function setupLineToggle() {
+        async function setupLineToggle() {
         const toggle = $("lineToggleBtn");
         const desc = $("lineDesc");
 
@@ -1458,9 +1466,10 @@
 
         setText("elapsedTime", formatTime(displayedElapsedSeconds));
     }
+
     /* =========================
-   Render
-========================= */
+       Render
+    ========================= */
 
     function renderConnectionError() {
         const cameraStatus = $("cameraStatus");
@@ -1597,8 +1606,7 @@
             setText("fsaHint", "อ่านค่าไม่ได้");
         }
     }
-
-    function renderStats(summary) {
+        function renderStats(summary) {
         syncElapsedTimeFromSummary(summary);
 
         const effective = Number(summary.effective_seated_seconds || 0);
@@ -1838,6 +1846,8 @@
             return;
         }
 
+        // กันการยิงซ้ำจาก polling ที่ถี่กว่า alert จริง
+        // ไม่ใช้ cooldown ยาว เพราะ backend เป็นตัวคุมรอบ alert แล้ว
         if (now - lastFrontendAlertTime < FRONTEND_ALERT_COOLDOWN) {
             return;
         }
@@ -1847,14 +1857,26 @@
         const alertMessage = buildPostureAlertMessage(posture);
 
         showBrowserNotification(alertMessage);
+        playAlertSpeech(alertMessage);
+    }
 
-        if (window.alertSpeech && typeof window.alertSpeech.speak === "function") {
-            window.alertSpeech.speak(alertMessage);
+    function playAlertSpeech(message) {
+        if (!window.alertSpeech || typeof window.alertSpeech.speak !== "function") {
+            return;
+        }
+
+        try {
+            window.alertSpeech.speak(message);
+        } catch (err) {
+            console.warn("Cannot play alert speech:", err);
         }
     }
 
     function shouldShowBrowserNotification() {
-        return document.hidden || !document.hasFocus();
+        // เดิมเช็ก document.hidden || !document.hasFocus()
+        // ทำให้ตอนเปิดหน้า Monitoring อยู่ notification ไม่เด้ง
+        // แก้เป็น true เพื่อให้แสดงตาม alert จาก backend เสมอ
+        return true;
     }
 
     function showBrowserNotification(message) {
@@ -1875,10 +1897,20 @@
         }
 
         try {
-            new Notification("PostureGuard AI", {
+            const notification = new Notification("PostureGuard AI", {
                 body: message || "กรุณาปรับท่านั่งให้อยู่ในท่าที่เหมาะสม",
+                tag: "postureguard-posture-alert",
+                renotify: true,
                 silent: false,
             });
+
+            window.setTimeout(() => {
+                try {
+                    notification.close();
+                } catch (_) {
+                    // ignore
+                }
+            }, 6000);
         } catch (err) {
             console.warn("Cannot show browser notification:", err);
         }

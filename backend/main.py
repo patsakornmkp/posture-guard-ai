@@ -478,7 +478,7 @@ def get_session_summary():
 
     return _summary_to_response(
         summary,
-        session_active=summary["session_active"],
+        session_active=summary.get("session_active", False),
     )
 
 
@@ -974,6 +974,7 @@ def _session_record_to_summary(session: dict) -> dict:
 
     forward_alerts = _safe_int(session.get("forward_head_alert_count"))
     rounded_alerts = _safe_int(session.get("rounded_shoulder_alert_count"))
+
     alert_count = max(
         _safe_int(session.get("alert_count")),
         forward_alerts + rounded_alerts,
@@ -1019,6 +1020,9 @@ def _session_record_to_summary(session: dict) -> dict:
 
         "bad_posture_ratio": round(bad_ratio, 3),
         "good_posture_ratio": round(good_ratio, 3),
+
+        # ใส่ fallback ไว้เพื่อให้ frontend หรือ helper อื่นอ่านได้ปลอดภัย
+        "current_status": session.get("current_status") or "no_person_detected",
         "risk_level": session.get("risk_level") or "low",
     }
 
@@ -1027,7 +1031,7 @@ def _summary_to_response(
     summary: dict,
     session_active: bool,
 ) -> schemas.SessionSummaryResponse:
-    """แปลง dict summary เป็น Pydantic response"""
+    """แปลง dict summary เป็น Pydantic response แบบกัน key หาย"""
 
     status_mapping = {
         "good": schemas.PostureStatus.GOOD,
@@ -1043,36 +1047,64 @@ def _summary_to_response(
         "high": schemas.RiskLevel.HIGH,
     }
 
+    current_status = summary.get("current_status") or "no_person_detected"
+    risk_level = summary.get("risk_level") or "low"
+
     return schemas.SessionSummaryResponse(
-        session_active=session_active,
+        session_active=bool(session_active),
         planned_duration_minutes=summary.get("planned_duration_minutes"),
-        actual_duration_seconds=summary["actual_duration_seconds"],
-        effective_seated_seconds=summary["effective_seated_seconds"],
 
-        good_posture_seconds=summary["good_posture_seconds"],
-        bad_posture_seconds=summary["bad_posture_seconds"],
-
-        forward_head_seconds=summary["forward_head_seconds"],
-        rounded_shoulder_seconds=summary["rounded_shoulder_seconds"],
-
-        forward_head_alert_count=summary.get(
-            "forward_head_alert_count",
-            0,
+        actual_duration_seconds=_safe_float(
+            summary.get("actual_duration_seconds"),
+            0.0,
         ),
-        rounded_shoulder_alert_count=summary.get(
-            "rounded_shoulder_alert_count",
-            0,
+        effective_seated_seconds=_safe_float(
+            summary.get("effective_seated_seconds"),
+            0.0,
         ),
 
-        alert_count=summary["alert_count"],
-        bad_posture_ratio=summary["bad_posture_ratio"],
+        good_posture_seconds=_safe_float(
+            summary.get("good_posture_seconds"),
+            0.0,
+        ),
+        bad_posture_seconds=_safe_float(
+            summary.get("bad_posture_seconds"),
+            0.0,
+        ),
+
+        forward_head_seconds=_safe_float(
+            summary.get("forward_head_seconds"),
+            0.0,
+        ),
+        rounded_shoulder_seconds=_safe_float(
+            summary.get("rounded_shoulder_seconds"),
+            0.0,
+        ),
+
+        forward_head_alert_count=_safe_int(
+            summary.get("forward_head_alert_count"),
+            0,
+        ),
+        rounded_shoulder_alert_count=_safe_int(
+            summary.get("rounded_shoulder_alert_count"),
+            0,
+        ),
+
+        alert_count=_safe_int(
+            summary.get("alert_count"),
+            0,
+        ),
+        bad_posture_ratio=_safe_float(
+            summary.get("bad_posture_ratio"),
+            0.0,
+        ),
 
         current_status=status_mapping.get(
-            summary["current_status"],
+            current_status,
             schemas.PostureStatus.NO_PERSON_DETECTED,
         ),
         risk_level=risk_mapping.get(
-            summary["risk_level"],
+            risk_level,
             schemas.RiskLevel.LOW,
         ),
     )
