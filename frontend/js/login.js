@@ -2,31 +2,17 @@
    Login Page
    File: frontend/js/login.js
 
-   UX minimal-change:
-   1) กันผู้ใช้ที่ login แล้วกลับมาหน้า login
-   2) กัน submit ซ้ำ
-   3) ตรวจ input ก่อนเรียก backend
-   4) แสดง loading/error ใน message เดิม
-   5) login สำเร็จแล้ว redirect ด้วย replace
-   6) ถ้ามี active monitoring session จะกลับ monitoring
+   Fix Part 9:
+   - ผูก event submit ทันที ไม่รอ async session guard ก่อน
+   - ลดโอกาสกดปุ่มแล้วไม่มีอะไรเกิดขึ้น
+   - login สำเร็จแล้วไป setup.html โดยตรง
+   - เคลียร์ session flow เก่าที่ค้างใน localStorage ก่อนเริ่มใหม่
 ========================================= */
 
 (function () {
     "use strict";
 
-    document.addEventListener("DOMContentLoaded", async () => {
-        if (!window.api || !window.utils) {
-            alert("ระบบ frontend โหลดไม่ครบ กรุณาตรวจสอบการเรียกไฟล์ app.js");
-            window.location.replace("login.html");
-            return;
-        }
-
-        const canStayOnLogin = await utils.redirectAuthenticatedAwayFromAuthPage();
-
-        if (!canStayOnLogin) {
-            return;
-        }
-
+    document.addEventListener("DOMContentLoaded", () => {
         const loginForm = document.getElementById("loginForm");
         const usernameInput = document.getElementById("username");
         const passwordInput = document.getElementById("password");
@@ -35,6 +21,12 @@
 
         if (!loginForm || !usernameInput || !passwordInput || !msg || !submitBtn) {
             console.error("login.js: login form elements ไม่ครบ");
+            return;
+        }
+
+        if (!window.api || !window.utils) {
+            showMessage("ระบบ frontend โหลดไม่ครบ กรุณาตรวจสอบว่า app.js โหลดสำเร็จ", "error");
+            submitBtn.disabled = true;
             return;
         }
 
@@ -52,7 +44,6 @@
             const password = passwordInput.value;
 
             const validationMessage = validateLoginForm(username, password);
-
             if (validationMessage) {
                 showMessage(validationMessage, "error");
                 focusInvalidInput(username, password);
@@ -69,21 +60,19 @@
                     throw new Error("ข้อมูลผู้ใช้จาก backend ไม่ถูกต้อง");
                 }
 
+                // เก็บ user ล่าสุด และล้าง state session เก่าที่อาจค้างจากรอบก่อน
                 localStorage.setItem("currentUser", JSON.stringify(user));
 
-                showMessage("เข้าสู่ระบบสำเร็จ กำลังตรวจสอบ session...", "success");
-
-                const session = await utils.getBackendSessionStatus();
-
-                if (session.status === "active") {
-                    utils.markMonitoringSessionStarted();
-                    utils.redirectTo("monitoring.html", { replace: true });
-                    return;
+                if (utils.clearSessionFlowState) {
+                    utils.clearSessionFlowState({ keepLast: false });
                 }
 
-                utils.clearSessionFlowState({ keepLast: false });
-                utils.redirectTo("setup.html", { replace: true });
+                showMessage("เข้าสู่ระบบสำเร็จ กำลังไปหน้าเริ่มใช้งาน...", "success");
+
+                window.location.replace("setup.html");
             } catch (err) {
+                console.error("Login failed:", err);
+
                 showMessage(
                     err.message || "เข้าสู่ระบบไม่สำเร็จ กรุณาลองอีกครั้ง",
                     "error"
@@ -121,17 +110,19 @@
             msg.hidden = false;
             msg.textContent = text;
 
+            msg.classList.remove("success", "error");
+
             if (type === "success") {
                 msg.classList.add("success");
             } else {
-                msg.classList.remove("success");
+                msg.classList.add("error");
             }
         }
 
         function hideMessage() {
             msg.hidden = true;
             msg.textContent = "";
-            msg.classList.remove("success");
+            msg.classList.remove("success", "error");
         }
 
         function setFormLoading(isLoading, loadingText = "กำลังเข้าสู่ระบบ...") {

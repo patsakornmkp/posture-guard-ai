@@ -301,6 +301,18 @@ class LineNotificationService:
 
         return f"https://line.me/R/oaMessage/{encoded_oa_id}/?{encoded_text}"
 
+    def _mask_line_user_id(self, line_user_id: Optional[str]) -> Optional[str]:
+        """ซ่อน LINE userId จริง แต่ยังให้ผู้ใช้เห็นว่าผูกกับปลายทางใดอยู่"""
+        value = str(line_user_id or "").strip()
+
+        if not value:
+            return None
+
+        if len(value) <= 10:
+            return value[:2] + "***"
+
+        return f"{value[:6]}...{value[-4:]}"
+
     # ========================
     # Status / User settings
     # ========================
@@ -334,22 +346,25 @@ class LineNotificationService:
             and bool(self.channel_secret)
         )
 
-        # Backward compatibility: ถ้าไม่ส่ง user_id จะคืนสถานะแบบระบบเก่า
+        # สำคัญ: ในระบบ multi-user ห้ามใช้ LINE_USER_ID จาก .env
+        # มาตัดสินว่า user ปัจจุบัน "ผูกบัญชีแล้ว"
+        # เพราะจะทำให้หน้าเว็บขึ้นว่าผูกแล้วทั้งที่ user ยังไม่ได้สแกน QR
+        # ถ้า frontend ไม่ส่ง user_id ให้คืนเฉพาะสถานะระบบ ไม่คืนสถานะผูกบัญชี
         if user_id is None:
             status.update({
-                "line_enabled": self.system_line_enabled,
-                "has_line_user_id": bool(self.global_line_user_id),
-                "line_user_id": self.global_line_user_id or None,
-                "is_linked": bool(self.global_line_user_id),
-                "line_notify_enabled": self.system_line_enabled,
+                "user_id": None,
+                "line_enabled": False,
+                "line_notify_enabled": False,
+                "has_line_user_id": False,
+                "line_user_id": None,
+                "is_linked": False,
+                "line_link_code": None,
+                "line_link_code_expires_at": None,
+                "line_link_code_active": False,
                 "system_ready": system_ready,
                 "can_create_link_code": bool(self.line_official_account_id),
-                "can_send_line": (
-                    self.system_line_enabled
-                    and bool(self.channel_access_token)
-                    and bool(self.global_line_user_id)
-                ),
-                "mode": "global_fallback",
+                "can_send_line": False,
+                "mode": "system_only_no_user",
             })
             return status
 
@@ -394,6 +409,12 @@ class LineNotificationService:
             # ไม่จำเป็นต้องโชว์ LINE userId จริงใน UI
             # แต่คง field ไว้เพื่อ backward compatibility
             "line_user_id": user_line.get("line_user_id") if linked else None,
+            "line_user_id_masked": self._mask_line_user_id(user_line.get("line_user_id")) if linked else None,
+            "linked_summary": (
+                f"LINE User ID: {self._mask_line_user_id(user_line.get('line_user_id'))}"
+                if linked
+                else None
+            ),
 
             "is_linked": linked,
             "line_link_code": line_link_code,
@@ -456,6 +477,22 @@ class LineNotificationService:
             "qr_payload": line_open_url,
         }
 
+    def unlink_user_account(self, user_id: int) -> dict[str, Any]:
+        """ยกเลิกการผูกบัญชี LINE ของ user ปัจจุบัน"""
+        user_line = db.unlink_line_user(user_id)
+
+        if not user_line:
+            return {
+                **self.get_status(user_id),
+                "success": False,
+                "message": "User not found",
+            }
+
+        status = self.get_status(user_id)
+        status["success"] = True
+        status["message"] = "LINE account unlinked"
+        return status
+
     def set_enabled(
         self,
         enabled: bool,
@@ -477,15 +514,9 @@ class LineNotificationService:
 
             return self.get_status(user_id)
 
-        # Backward compatibility สำหรับ endpoint เก่าที่ไม่ส่ง user_id
-        with self._lock:
-            self.system_line_enabled = enabled_bool
-            self._write_env_value(
-                "LINE_ENABLED",
-                "true" if enabled_bool else "false",
-            )
-
-        self.reload()
+        # ระบบปัจจุบันเป็น per-user เท่านั้น
+        # ไม่อนุญาตให้เปิด/ปิด LINE แบบ global จากหน้าเว็บ
+        # เพื่อป้องกันกรณี toggle เปิดได้ทั้งที่ user ยังไม่ได้ผูกบัญชี
         return self.get_status(None)
 
     # ========================
@@ -1165,3 +1196,13 @@ def get_line_notification_status(user_id: Optional[int] = None) -> dict:
     """ดูสถานะ LINE config แบบไม่เปิดเผย token"""
     notification_service.reload()
     return notification_service.get_status(user_id=user_id)
+
+def unlink_line_account(user_id: int) -> dict:
+    """
+    ยกเลิกการผูกบัญชี LINE ของ user
+
+    function นี้เป็น wrapper ให้ main.py เรียกใช้
+    เพื่อไม่ให้ backend import error ตอนเริ่ม uvicorn
+    """
+    return notification_service.unlink_user_account(user_id=user_id)
+

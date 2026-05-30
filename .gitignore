@@ -1,28 +1,47 @@
 # Python
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
 
-# Virtual Env
+# Virtual environments
 venv/
 .venv/
+backend/venv/
+backend/.venv/
+backend/venvcd/
+backend/backend/
 
-# Database
+# Database / local runtime
 *.db
+*.sqlite
+*.sqlite3
+backend/*.db
+backend/*.sqlite
+backend/*.sqlite3
 
-# Environment
+# Environment / secrets
 .env
+.env.*
+!.env.example
 
-# VSCode
+# Editor / OS
 .vscode/
+.idea/
+.DS_Store
+Thumbs.db
 
 # Logs
 *.log
+logs/
 
-# Linux
-.DS_Store
-
-# MediaPipe / AI cache
+# MediaPipe / AI cache / generated artifacts
 *.tflite
+*.task
 
 # Node
 node_modules/
+
+# Test / cache
+.pytest_cache/
+.coverage
+htmlcov/

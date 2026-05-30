@@ -10,6 +10,7 @@
 # - นับเวลา "ท่าทางเหมาะสม" ต่อไปจนกว่าปัญหาจะถูกแจ้งเตือนจริง
 # - แยก timer/alert active ของคอยื่น และไหล่ห่อ
 # - นับจำนวนแจ้งเตือนแยกประเภท: คอยื่น / ไหล่ห่อ
+# - ใช้ bad_seconds เป็นเวลาท่าผิดรวมจริง ไม่เอา forward+rounded มาบวกเป็นเวลารวม
 # - ไม่มี warning แล้ว
 # - ส่ง LINE notification เฉพาะจังหวะ alert จริง ไม่ส่งทุก frame
 # - ส่ง LINE ตาม user_id ของ session ปัจจุบัน เพื่อรองรับ multi-user
@@ -194,16 +195,15 @@ class SessionState:
                 self.rounded_shoulder_alert_count += 1
 
     def _calculate_risk(self) -> str:
-        """คำนวณระดับความเสี่ยง"""
+        """คำนวณระดับความเสี่ยงจากเวลาท่าผิดรวมจริง
+
+        ห้ามใช้ forward_head_seconds + rounded_shoulder_seconds เป็นเวลารวม
+        เพราะถ้าคอยื่นและไหล่ห่อเกิดพร้อมกัน จะทำให้เวลาถูกนับซ้ำ
+        """
         if self.effective_seconds <= 0:
             return "low"
 
-        issue_seconds = (
-            self.forward_head_seconds
-            + self.rounded_shoulder_seconds
-        )
-
-        ratio = issue_seconds / self.effective_seconds
+        ratio = self.bad_seconds / self.effective_seconds
 
         if ratio < config.RISK_LOW_THRESHOLD:
             return "low"
@@ -223,13 +223,8 @@ class SessionState:
             else 0.0
         )
 
-        issue_seconds = (
-            self.forward_head_seconds
-            + self.rounded_shoulder_seconds
-        )
-
         bad_ratio = (
-            issue_seconds / self.effective_seconds
+            self.bad_seconds / self.effective_seconds
             if self.effective_seconds > 0
             else 0.0
         )

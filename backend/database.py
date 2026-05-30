@@ -381,7 +381,9 @@ def create_line_link_code(user_id: int, ttl_minutes: int = 10) -> Optional[dict]
     """
     สร้างรหัสผูก LINE ให้ user
 
-    - ไม่แตะ password/session เดิม
+    - ใช้สำหรับเริ่มผูกบัญชีใหม่หรือผูกซ้ำ
+    - สำคัญ: เมื่อต้องการผูกใหม่ ต้องล้าง line_user_id เดิมก่อน
+      เพื่อไม่ให้หน้าเว็บ polling แล้วเข้าใจผิดว่า "ผูกสำเร็จ" ทั้งที่ยังไม่ได้สแกน QR ใหม่
     - ถ้ารหัสซ้ำจะสุ่มใหม่
     - รหัสหมดอายุตาม ttl_minutes
     """
@@ -422,11 +424,47 @@ def create_line_link_code(user_id: int, ttl_minutes: int = 10) -> Optional[dict]
         conn.execute(
             """
             UPDATE users
-            SET line_link_code = ?,
+            SET line_user_id = NULL,
+                line_notify_enabled = 0,
+                line_link_code = ?,
                 line_link_code_expires_at = ?
             WHERE id = ?
             """,
             (code, expires_at, user_id),
+        )
+
+    return get_user_line_status(user_id)
+
+
+
+def unlink_line_user(user_id: int) -> Optional[dict]:
+    """
+    ยกเลิกการผูก LINE ของ user
+
+    ใช้เมื่อผู้ใช้ต้องการยกเลิกบัญชี LINE เดิม หรือเตรียมผูกบัญชีใหม่
+    - ลบ line_user_id
+    - ปิด line_notify_enabled
+    - ล้างรหัสผูกบัญชีที่ค้างอยู่
+    """
+    with get_connection() as conn:
+        user_exists = conn.execute(
+            "SELECT 1 FROM users WHERE id = ? LIMIT 1",
+            (user_id,),
+        ).fetchone()
+
+        if not user_exists:
+            return None
+
+        conn.execute(
+            """
+            UPDATE users
+            SET line_user_id = NULL,
+                line_notify_enabled = 0,
+                line_link_code = NULL,
+                line_link_code_expires_at = NULL
+            WHERE id = ?
+            """,
+            (user_id,),
         )
 
     return get_user_line_status(user_id)

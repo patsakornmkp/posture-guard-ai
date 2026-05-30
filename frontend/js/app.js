@@ -17,14 +17,23 @@
     if (window.__postureGuardLoaded) return;
     window.__postureGuardLoaded = true;
 
-    const API_BASE =
-        window.POSTUREGUARD_API_BASE ||
-        (
-            window.location.hostname === "localhost" ||
-            window.location.hostname === "127.0.0.1"
-                ? "http://127.0.0.1:8000"
-                : `http://${window.location.hostname}:8000`
-        );
+    function resolveApiBase() {
+        if (window.POSTUREGUARD_API_BASE) {
+            return window.POSTUREGUARD_API_BASE.replace(/\/$/, "");
+        }
+
+        const host = window.location.hostname;
+
+        // 0.0.0.0 ใช้สำหรับ bind server เท่านั้น ไม่ควรใช้เป็น address สำหรับ browser fetch
+        if (!host || host === "localhost" || host === "127.0.0.1" || host === "0.0.0.0") {
+            return "http://127.0.0.1:8000";
+        }
+
+        return `http://${host}:8000`;
+    }
+
+    const API_BASE = resolveApiBase();
+    const API_TIMEOUT_MS = 8000;
 
     const STORAGE_KEYS = {
         currentUser: "currentUser",
@@ -194,24 +203,24 @@
         },
 
         setLineEnabled(userId, enabled) {
-            const payload = userId
-                ? {
-                    user_id: userId,
-                    enabled: Boolean(enabled),
-                }
-                : {
-                    enabled: Boolean(enabled),
-                };
+            if (!userId) {
+                return Promise.reject(new Error("ไม่พบข้อมูลผู้ใช้ที่เข้าสู่ระบบ"));
+            }
 
-            return apiRequest("POST", "/notification/line/enabled", payload);
+            return apiRequest("POST", "/notification/line/enabled", {
+                user_id: userId,
+                enabled: Boolean(enabled),
+            });
         },
 
-        testLineNotification(userId) {
-            const payload = userId
-                ? { user_id: userId }
-                : {};
+        unlinkLineAccount(userId) {
+            if (!userId) {
+                return Promise.reject(new Error("ไม่พบข้อมูลผู้ใช้ที่เข้าสู่ระบบ"));
+            }
 
-            return apiRequest("POST", "/notification/test-line", payload);
+            return apiRequest("POST", "/notification/line/unlink", {
+                user_id: userId,
+            });
         },
     };
 

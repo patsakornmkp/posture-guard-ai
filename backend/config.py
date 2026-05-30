@@ -125,6 +125,10 @@ ROUNDED_SHOULDER_SEVERE_THRESHOLD: float = 52.0
 # ตอนนี้แนะนำให้ใช้ marker เฉพาะกกหู / tragus
 # ส่วน C7 ยังใช้ค่าประมาณจาก MediaPipe เพื่อลดปัญหา marker C7/ไหล่สลับกัน
 
+# ใช้หัวไหล่ฝั่งที่เห็นชัดเป็นฐานในการประมาณ C7
+# เหมาะกับกล้องด้านข้าง เพราะ opposite shoulder มักหลุด/แกว่งจาก MediaPipe
+C7_USE_VISIBLE_SHOULDER_ONLY: bool = True
+
 C7_UP_OFFSET_RATIO: float = 0.08
 C7_BACK_OFFSET_RATIO: float = 0.04
 
@@ -144,20 +148,30 @@ TRAGUS_FORWARD_OFFSET_RATIO: float = 0.018
 # Green Marker Detection
 # ========================
 #
-# ตอนนี้ใช้ marker สีเขียวเฉพาะจุดกกหู / tragus เท่านั้น
-# ไม่ใช้ marker C7 และ shoulder เพื่อลดปัญหาจุดสลับกัน
+# ค่าแนะนำสำหรับ demo: ปิดไว้ก่อน เพื่อไม่ให้สีเขียวอื่นในฉากหลังถูกเข้าใจผิดเป็น marker
+# ถ้าจะใช้สติกเกอร์ marker จริง ให้เปิดเป็น True และติดเฉพาะจุดกกหู / tragus เท่านั้น
+# ระบบจะไม่ใช้ marker แทน C7/Shoulder เพราะมีโอกาสสลับจุดสูงในมุมกล้องด้านข้าง
 
 ENABLE_GREEN_MARKER_DETECTION: bool = True
 
+# ผู้ใช้ติด sticker 3 จุดจริง: Tragus / C7 / Shoulder
+# True = ถ้าเจอ marker ครบและ assign ได้ จะใช้ marker ทั้ง 3 จุดแทน MediaPipe
+# False = ใช้ marker เฉพาะ Tragus แล้วใช้ MediaPipe/estimate สำหรับ C7/Shoulder
+USE_GREEN_MARKER_THREE_POINT_MODE: bool = True
+
+# วาดวงกลมเล็กสีม่วงบน sticker ที่ระบบตรวจพบดิบ ๆ
+# ใช้ debug ว่าระบบมองเห็น sticker หรือไม่
+DRAW_DETECTED_GREEN_MARKERS: bool = True
+
 # สีเขียว
-GREEN_HSV_LOWER: tuple[int, int, int] = (35, 80, 80)
-GREEN_HSV_UPPER: tuple[int, int, int] = (85, 255, 255)
+GREEN_HSV_LOWER: tuple[int, int, int] = (35, 45, 45)
+GREEN_HSV_UPPER: tuple[int, int, int] = (90, 255, 255)
 
 # ถ้าเปลี่ยนไปใช้สีเหลือง ให้ใช้ประมาณนี้แทน
 # GREEN_HSV_LOWER: tuple[int, int, int] = (20, 80, 80)
 # GREEN_HSV_UPPER: tuple[int, int, int] = (35, 255, 255)
 
-GREEN_MARKER_MIN_AREA: int = 40
+GREEN_MARKER_MIN_AREA: int = 18
 GREEN_MARKER_MAX_AREA: int = 10000
 
 
@@ -171,7 +185,7 @@ GREEN_MARKER_MAX_AREA: int = 10000
 # คะแนน cost สูงสุดที่ยอมรับ ถ้าเกินจะ fallback ไปใช้ MediaPipe
 # ต่ำ = เข้มงวด ตรวจไม่เจอจะ fallback ง่าย
 # สูง = ผ่อนปรน ใช้ marker แม้คะแนนไม่ดี
-MARKER_ASSIGNMENT_MAX_COST: float = 2.5
+MARKER_ASSIGNMENT_MAX_COST: float = 4.5
 
 # น้ำหนัก temporal consistency
 # 0 = ไม่สนเฟรมก่อนเลย เปลี่ยนทันที

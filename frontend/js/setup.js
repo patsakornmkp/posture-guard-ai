@@ -88,7 +88,7 @@ function setupStartButton(user) {
             );
 
             startBtn.disabled = false;
-            startBtn.textContent = "เริ่มตรวจจับท่านั่ง";
+            startBtn.textContent = "▶ เริ่มใช้งาน";
         }
     });
 }
@@ -98,6 +98,7 @@ function setStatus(element, message, type = "info") {
         return;
     }
 
+    element.hidden = false;
     element.textContent = message;
     element.classList.remove("is-info", "is-loading", "is-success", "is-error");
     element.classList.add(`is-${type}`);

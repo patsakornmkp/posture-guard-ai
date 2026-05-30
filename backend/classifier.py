@@ -102,15 +102,15 @@ def classify_cva(cva_angle: Optional[float]) -> str:
     จำแนกภาวะคอยื่นจากมุม CVA
 
     เกณฑ์ใหม่:
-    - CVA >= 50 องศา = good
-    - CVA < 50 องศา = bad
+    - CVA >= 45 องศา = good
+    - CVA < 45 องศา = bad
     """
     if cva_angle is None:
         return "unknown"
 
     good_threshold = _get_config_value(
         "FORWARD_HEAD_GOOD_THRESHOLD",
-        50.0,
+        45.0,
     )
 
     if cva_angle >= good_threshold:
@@ -124,15 +124,15 @@ def classify_fsa(fsa_angle: Optional[float]) -> str:
     จำแนกภาวะไหล่ห่อจากมุม FSA
 
     เกณฑ์ใหม่:
-    - FSA >= 54 องศา = good
-    - FSA < 54 องศา = bad
+    - FSA >= 52 องศา = good
+    - FSA < 52 องศา = bad
     """
     if fsa_angle is None:
         return "unknown"
 
     good_threshold = _get_config_value(
         "ROUNDED_SHOULDER_GOOD_THRESHOLD",
-        54.0,
+        52.0,
     )
 
     if fsa_angle >= good_threshold:
@@ -272,12 +272,12 @@ class PostureClassifier:
         """
         จัดการ timer ของคอยื่น
 
-        ถ้า CVA < 50:
+        ถ้า CVA < 45:
         - เริ่มจับเวลา
         - ครบ 3 นาที → forward_head_alert = True
         - ถ้ายังคอยื่นต่อ → เตือนซ้ำทุก 3 นาที
 
-        ถ้า CVA >= 50:
+        ถ้า CVA >= 45:
         - reset timer คอยื่นทันที
         """
         if not is_issue:
@@ -321,12 +321,12 @@ class PostureClassifier:
         """
         จัดการ timer ของไหล่ห่อ
 
-        ถ้า FSA < 54:
+        ถ้า FSA < 52:
         - เริ่มจับเวลา
         - ครบ 3 นาที → rounded_shoulder_alert = True
         - ถ้ายังไหล่ห่อต่อ → เตือนซ้ำทุก 3 นาที
 
-        ถ้า FSA >= 54:
+        ถ้า FSA >= 52:
         - reset timer ไหล่ห่อทันที
         """
         if not is_issue:

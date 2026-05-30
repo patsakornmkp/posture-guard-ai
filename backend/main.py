@@ -37,8 +37,8 @@ from notification_service import (
     create_line_link_code,
     get_line_notification_status,
     handle_line_webhook,
-    send_test_line_notification,
     set_line_notification_enabled,
+    unlink_line_account,
 )
 from state import CameraThread, SessionState
 
@@ -691,21 +691,17 @@ def create_line_binding_code(payload: dict):
 @app.post("/notification/line/enabled", response_model=dict)
 def set_line_enabled(payload: dict):
     """
-    เปิด/ปิด LINE notification
+    เปิด/ปิด LINE notification เฉพาะ user ที่ login อยู่
 
-    payload แบบใหม่:
+    payload:
     {
         "user_id": 1,
         "enabled": true
     }
 
-    payload แบบเก่า:
-    {
-        "enabled": true
-    }
-
-    ถ้ามี user_id จะเปิด/ปิดเฉพาะ user นั้น
-    ถ้าไม่มี user_id จะ fallback เป็นระบบ global เดิม
+    กติกาสำคัญ:
+    - ต้องมี user_id เสมอ เพื่อไม่ให้ไปเปิดระบบ global ผิดบัญชี
+    - ถ้าจะเปิด enabled=true ต้องผูกบัญชี LINE แล้วเท่านั้น
     """
     if "enabled" not in payload or not isinstance(payload.get("enabled"), bool):
         raise HTTPException(
@@ -714,22 +710,35 @@ def set_line_enabled(payload: dict):
         )
 
     raw_user_id = payload.get("user_id")
-    user_id: Optional[int] = None
 
-    if raw_user_id is not None:
-        try:
-            user_id = int(raw_user_id)
-        except (TypeError, ValueError):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="user_id must be integer",
-            )
+    if raw_user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="user_id is required for LINE notification settings",
+        )
 
-        if db.get_user_by_id(user_id) is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="User not found",
-            )
+    try:
+        user_id = int(raw_user_id)
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="user_id must be integer",
+        )
+
+    if db.get_user_by_id(user_id) is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+
+    current_line_status = db.get_user_line_status(user_id)
+    is_linked = bool(current_line_status and current_line_status.get("line_user_id"))
+
+    if payload["enabled"] is True and not is_linked:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="LINE account is not linked for this user",
+        )
 
     try:
         line_status = set_line_notification_enabled(
@@ -747,57 +756,59 @@ def set_line_enabled(payload: dict):
         return {
             "success": False,
             "line": None,
-            "message": "Cannot update LINE notification enabled flag",
+            "message": "Cannot update LINE notification status",
             "detail": str(err),
         }
 
 
-@app.post("/notification/test-line", response_model=dict)
-def test_line_notification(payload: Optional[dict] = None):
-    """
-    ส่งข้อความทดสอบ LINE แบบ manual
 
-    payload แบบใหม่:
+
+@app.post("/notification/line/unlink", response_model=dict)
+def unlink_line_binding(payload: dict):
+    """
+    ยกเลิกการผูกบัญชี LINE ของ user ที่ login อยู่
+
+    payload:
     {
         "user_id": 1
     }
-
-    ถ้ามี user_id จะส่งหา LINE ของ user นั้นเท่านั้น
-    ถ้าไม่มี user_id จะ fallback endpoint เดิม
     """
-    payload = payload or {}
     raw_user_id = payload.get("user_id")
-    user_id: Optional[int] = None
 
-    if raw_user_id is not None:
-        try:
-            user_id = int(raw_user_id)
-        except (TypeError, ValueError):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="user_id must be integer",
-            )
-
-        if db.get_user_by_id(user_id) is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="User not found",
-            )
+    if raw_user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="user_id is required",
+        )
 
     try:
-        result = send_test_line_notification(user_id=user_id)
+        user_id = int(raw_user_id)
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="user_id must be integer",
+        )
+
+    if db.get_user_by_id(user_id) is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+
+    try:
+        line_status = unlink_line_account(user_id=user_id)
 
         return {
-            "success": bool(result.get("success")),
-            "result": result,
-            "message": result.get("message", "LINE test completed"),
+            "success": True,
+            "line": line_status,
+            "message": "LINE account unlinked",
         }
 
     except Exception as err:
         return {
             "success": False,
-            "result": None,
-            "message": "LINE test notification failed",
+            "line": None,
+            "message": "Cannot unlink LINE account",
             "detail": str(err),
         }
 
@@ -980,11 +991,10 @@ def _session_record_to_summary(session: dict) -> dict:
         forward_alerts + rounded_alerts,
     )
 
-    issue_seconds = max(
-        bad_seconds,
-        forward_seconds + rounded_seconds,
-        0.0,
-    )
+    # bad_seconds คือเวลาท่าผิดรวมจริงของ session
+    # ห้ามใช้ forward_seconds + rounded_seconds เป็นเวลารวม
+    # เพราะถ้าคอยื่นและไหล่ห่อเกิดพร้อมกัน จะนับเวลาซ้ำ
+    issue_seconds = max(bad_seconds, 0.0)
 
     bad_ratio = (
         issue_seconds / effective_seconds

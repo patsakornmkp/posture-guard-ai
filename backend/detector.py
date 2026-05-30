@@ -147,6 +147,12 @@ class PoseDetector:
             c7=reference_points["c7"],
         )
 
+        if getattr(config, "DRAW_DETECTED_GREEN_MARKERS", True):
+            self._draw_detected_marker_candidates(
+                frame=annotated,
+                markers=reference_points.get("detected_markers", []),
+            )
+
         self._draw_posture_overlay(
             frame=annotated,
             reference_points=reference_points,
@@ -310,23 +316,18 @@ class PoseDetector:
         """
         สร้างจุดอ้างอิงที่ใช้คำนวณ CVA/FSA
 
-        ถ้าเปิด green marker และเจอ marker อย่างน้อย 3 จุด:
-        - จุดบนสุด = tragus / ear
-        - จุดกลาง = C7
-        - จุดล่างสุด = shoulder
-
-        ถ้า marker ไม่ครบ:
-        - fallback ไปใช้ MediaPipe ear/shoulder + estimated C7
+        แนวทางรอบนี้:
+        - ถ้าเปิด marker mode และตรวจพบ sticker 3 จุด จะใช้ marker เป็น Tragus / C7 / Shoulder
+        - ถ้า marker ไม่ครบหรือ assign ไม่ผ่าน จะ fallback ไปใช้ MediaPipe + estimated C7
+        - วาด marker ดิบที่ detect ได้เพื่อ debug ว่าสี sticker ถูกจับหรือไม่
         """
 
-        # fallback เริ่มต้นจาก MediaPipe
+        # ค่า fallback จาก MediaPipe
         ear = self._estimate_tragus_from_ear(
             ear=side_points["ear"],
             width=width,
         )
-
         shoulder = side_points["shoulder"]
-
         c7 = self._estimate_c7(
             side_points=side_points,
             width=width,
@@ -334,64 +335,54 @@ class PoseDetector:
         )
 
         markers = self._detect_green_markers(frame)
+        source = "mediapipe"
 
-        marker_refs = self._assign_green_markers_by_vertical_order(
-            markers=markers,
-            side_points=side_points,
-            width=width,
-            height=height,
-        )
+        if markers:
+            use_three_point_mode = getattr(
+                config,
+                "USE_GREEN_MARKER_THREE_POINT_MODE",
+                False,
+            )
 
-        if marker_refs is not None:
-            return marker_refs
+            if use_three_point_mode and len(markers) >= 3:
+                assignment = self._assign_green_markers_by_vertical_order(
+                    markers=markers,
+                    side_points=side_points,
+                    width=width,
+                    height=height,
+                )
 
-        # ถ้า marker ไม่ครบ ใช้ fallback แบบเดิม แต่พยายาม snap เฉพาะจุดที่ใกล้จริง
-        if not markers:
-            return {
-                "ear": ear,
-                "shoulder": shoulder,
-                "c7": c7,
-            }
+                if assignment is not None:
+                    ear = assignment["ear"]
+                    c7 = assignment["c7"]
+                    shoulder = assignment["shoulder"]
+                    source = "green_marker_3_point"
+                else:
+                    # assignment ไม่ผ่าน ให้ล้าง anchor เก่าเพื่อไม่ให้เฟรมถัดไปเกาะผิดจุด
+                    self._last_marker_assignment = None
 
-        used_indices: set[int] = set()
+            if source == "mediapipe":
+                # fallback แบบปลอดภัย: snap เฉพาะ Tragus/ear เท่านั้น
+                used_indices: set[int] = set()
+                body_scale = max(self._distance(side_points["ear"], shoulder), 1.0)
 
-        marker_ear = self._nearest_marker(
-            markers=markers,
-            target=ear,
-            used_indices=used_indices,
-            max_distance=max(width, height) * 0.16,
-        )
+                marker_ear = self._nearest_marker(
+                    markers=markers,
+                    target=ear,
+                    used_indices=used_indices,
+                    max_distance=min(max(width, height) * 0.14, body_scale * 0.80),
+                )
 
-        if marker_ear is not None:
-            ear, marker_index = marker_ear
-            used_indices.add(marker_index)
-
-        marker_shoulder = self._nearest_marker(
-            markers=markers,
-            target=shoulder,
-            used_indices=used_indices,
-            max_distance=max(width, height) * 0.18,
-        )
-
-        if marker_shoulder is not None:
-            shoulder, marker_index = marker_shoulder
-            used_indices.add(marker_index)
-
-        marker_c7 = self._nearest_marker(
-            markers=markers,
-            target=c7,
-            used_indices=used_indices,
-            max_distance=max(width, height) * 0.20,
-        )
-
-        if marker_c7 is not None:
-            c7, marker_index = marker_c7
-            used_indices.add(marker_index)
+                if marker_ear is not None:
+                    ear, _ = marker_ear
+                    source = "green_marker_ear_only"
 
         return {
             "ear": ear,
             "shoulder": shoulder,
             "c7": c7,
+            "detected_markers": markers,
+            "source": source,
         }
 
     def _assign_green_markers_by_vertical_order(
@@ -713,21 +704,35 @@ class PoseDetector:
         shoulder = side_points["shoulder"]
         opposite_shoulder = side_points["opposite_shoulder"]
 
-        mid_x = (shoulder.x + opposite_shoulder.x) / 2
-        mid_y = (shoulder.y + opposite_shoulder.y) / 2
+        use_visible_shoulder_only = getattr(
+            config,
+            "C7_USE_VISIBLE_SHOULDER_ONLY",
+            True,
+        )
+
+        if use_visible_shoulder_only:
+            # สำหรับกล้องด้านข้าง shoulder ฝั่งที่เห็นชัดมักนิ่งกว่า opposite shoulder
+            # เพราะ opposite shoulder มักถูก MediaPipe เดาผิดหรือกระโดด
+            base_x = shoulder.x
+            base_y = shoulder.y
+            visibility = shoulder.visibility
+        else:
+            mid_x = (shoulder.x + opposite_shoulder.x) / 2
+            mid_y = (shoulder.y + opposite_shoulder.y) / 2
+            base_x = mid_x
+            base_y = mid_y
+            visibility = min(
+                shoulder.visibility,
+                opposite_shoulder.visibility,
+            )
 
         up_offset = getattr(config, "C7_UP_OFFSET_RATIO", 0.08) * height
         back_offset = getattr(config, "C7_BACK_OFFSET_RATIO", 0.04) * width
 
         forward_direction = getattr(config, "CAMERA_FORWARD_DIRECTION", 1)
 
-        c7_x = mid_x - (forward_direction * back_offset)
-        c7_y = mid_y - up_offset
-
-        visibility = min(
-            shoulder.visibility,
-            opposite_shoulder.visibility,
-        )
+        c7_x = base_x - (forward_direction * back_offset)
+        c7_y = base_y - up_offset
 
         return Point(
             x=c7_x,
@@ -995,6 +1000,30 @@ class PoseDetector:
         self._draw_point(frame, ear, ear_color, radius=6)
         self._draw_point(frame, c7, c7_color, radius=6)
         self._draw_point(frame, shoulder, shoulder_color, radius=6)
+
+    def _draw_detected_marker_candidates(
+        self,
+        frame: np.ndarray,
+        markers: list[Point],
+    ) -> None:
+        """
+        วาดจุด marker ดิบที่ระบบตรวจพบจาก HSV
+        ใช้เช็กว่า sticker ถูกจับหรือไม่ ก่อนถูก assign เป็น Tragus/C7/Shoulder
+        """
+        if not markers:
+            return
+
+        raw_color = (255, 0, 255)  # ม่วง = marker ที่ตรวจพบดิบ
+
+        for marker in markers:
+            cv2.circle(
+                frame,
+                (int(marker.x), int(marker.y)),
+                9,
+                raw_color,
+                2,
+                cv2.LINE_AA,
+            )
 
     def _draw_point(
         self,

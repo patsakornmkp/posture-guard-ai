@@ -22,6 +22,7 @@
     let videoInterval = null;
     let pollInterval = null;
     let elapsedInterval = null;
+    let lineStatusRefreshTimer = null;
 
     let sessionEnded = false;
     let videoFrameLoading = false;
@@ -54,8 +55,8 @@
 
     const CONNECTION_ERROR_VISIBLE_LIMIT = 1;
 
-    const CVA_NORMAL_THRESHOLD = 43;
-    const FSA_NORMAL_THRESHOLD = 54;
+    const CVA_NORMAL_THRESHOLD = 45;
+    const FSA_NORMAL_THRESHOLD = 52;
 
     const $ = (id) => document.getElementById(id);
 
@@ -107,6 +108,8 @@
 
         connectionErrorCount = 0;
         currentRiskInFrame = false;
+
+        stopLineStatusAutoRefresh();
 
         setText("elapsedTime", formatTime(0));
 
@@ -329,6 +332,7 @@
 
             closeSummaryPanel();
             openPanel(settingsPanel, settingsBtn, settingsCloseBtn);
+            refreshLineStatusNow();
         });
 
         settingsCloseBtn.addEventListener("click", () => {
@@ -683,6 +687,17 @@
                 desc.textContent = "กำลังอัปเดต...";
 
                 try {
+                    if (nextEnabled) {
+                        const latestBeforeEnable = await fetchLineStatus();
+
+                        if (!isLineStatusLinkedToCurrentUser(latestBeforeEnable)) {
+                            toggle.checked = false;
+                            renderLineStatus(latestBeforeEnable);
+                            showToast("ต้องผูกบัญชี LINE ก่อนเปิดแจ้งเตือน");
+                            return;
+                        }
+                    }
+
                     const updated = await setLineEnabled(nextEnabled);
 
                     renderLineStatus(updated);
@@ -716,9 +731,8 @@
 
     function setupLineActionButtons() {
         const linkBtn = $("lineLinkBtn");
+        const unlinkBtn = $("lineUnlinkBtn");
         const copyBtn = $("lineCopyBtn");
-        const testBtn = $("lineTestBtn");
-
         if (linkBtn) {
             linkBtn.addEventListener("click", async () => {
                 linkBtn.disabled = true;
@@ -727,6 +741,19 @@
                 hideLineError();
 
                 try {
+                    const currentStatus = await fetchLineStatusSafe();
+                    const isAlreadyLinked = isLineStatusLinkedToCurrentUser(currentStatus);
+
+                    if (isAlreadyLinked) {
+                        const confirmed = window.confirm(
+                            "บัญชีนี้ผูก LINE อยู่แล้ว ต้องการยกเลิกบัญชีเดิมและสร้าง QR เพื่อผูกใหม่หรือไม่?"
+                        );
+
+                        if (!confirmed) {
+                            return;
+                        }
+                    }
+
                     const result = await createLineLinkCode();
                     const status = normalizeLineStatusResponse(result) || result?.line || null;
 
@@ -749,13 +776,51 @@
                     showToast("สร้างรหัสผูก LINE แล้ว");
                 } catch (err) {
                     console.warn("Cannot create LINE link code:", err);
-                    renderLineErrorState(
-                        "ยังไม่สามารถสร้างรหัสผูก LINE ได้ กรุณาลองใหม่อีกครั้ง"
-                    );
+                    const message = err?.message
+                        ? `ยังไม่สามารถสร้างรหัสผูก LINE ได้: ${err.message}`
+                        : "ยังไม่สามารถสร้างรหัสผูก LINE ได้ กรุณาลองใหม่อีกครั้ง";
+
+                    renderLineErrorState(message);
                     showToast("สร้างรหัสผูก LINE ไม่สำเร็จ");
                 } finally {
                     linkBtn.disabled = false;
-                    linkBtn.textContent = "ผูกบัญชี LINE";
+
+                    const latest = await fetchLineStatusSafe();
+                    if (latest) {
+                        renderLineStatus(latest);
+                    } else {
+                        linkBtn.textContent = "ผูกบัญชี LINE";
+                    }
+                }
+            });
+        }
+
+        if (unlinkBtn) {
+            unlinkBtn.addEventListener("click", async () => {
+                const confirmed = window.confirm(
+                    "ต้องการยกเลิกการผูกบัญชี LINE ของผู้ใช้นี้หรือไม่?"
+                );
+
+                if (!confirmed) {
+                    return;
+                }
+
+                unlinkBtn.disabled = true;
+                unlinkBtn.textContent = "กำลังยกเลิก...";
+
+                try {
+                    const result = await unlinkLineAccount();
+                    const status = normalizeLineStatusResponse(result);
+
+                    renderLineStatus(status);
+                    showToast("ยกเลิกการผูกบัญชี LINE แล้ว");
+                } catch (err) {
+                    console.warn("Cannot unlink LINE account:", err);
+                    showToast("ยกเลิกการผูกบัญชี LINE ไม่สำเร็จ");
+                    setLineError(err?.message || "ยังไม่สามารถยกเลิกการผูก LINE ได้");
+                } finally {
+                    unlinkBtn.disabled = false;
+                    unlinkBtn.textContent = "ยกเลิกการผูก";
                 }
             });
         }
@@ -775,36 +840,6 @@
             });
         }
 
-        if (testBtn) {
-            testBtn.addEventListener("click", async () => {
-                testBtn.disabled = true;
-                testBtn.textContent = "กำลังทดสอบ...";
-
-                hideLineError();
-
-                try {
-                    const result = await testLineNotification();
-
-                    if (result?.success === true) {
-                        showToast("ส่งข้อความทดสอบ LINE แล้ว");
-                    } else {
-                        showToast("ส่ง LINE ไม่สำเร็จ");
-                        renderLineErrorState(
-                            "ยังส่งข้อความทดสอบไม่ได้ กรุณาตรวจสอบว่าผูกบัญชี LINE แล้วและเปิดแจ้งเตือนอยู่"
-                        );
-                    }
-                } catch (err) {
-                    console.warn("Cannot test LINE notification:", err);
-                    showToast("ทดสอบ LINE ไม่สำเร็จ");
-                    renderLineErrorState(
-                        "ยังส่งข้อความทดสอบไม่ได้ กรุณาลองใหม่อีกครั้ง"
-                    );
-                } finally {
-                    testBtn.disabled = false;
-                    testBtn.textContent = "ทดสอบ LINE";
-                }
-            });
-        }
     }
 
     function getCurrentUserId() {
@@ -844,14 +879,79 @@
         hideLineQr();
     }
 
+    async function refreshLineStatusNow() {
+        try {
+            const status = await fetchLineStatus();
+            renderLineStatus(status);
+            return status;
+        } catch (err) {
+            console.warn("Cannot refresh LINE status:", err);
+            return null;
+        }
+    }
+
+    function startLineStatusAutoRefresh() {
+        stopLineStatusAutoRefresh();
+
+        let remainingChecks = 40; // ประมาณ 2 นาที เมื่อ interval = 3 วินาที
+
+        lineStatusRefreshTimer = window.setInterval(async () => {
+            if (sessionEnded) {
+                stopLineStatusAutoRefresh();
+                return;
+            }
+
+            remainingChecks -= 1;
+
+            const status = await refreshLineStatusNow();
+
+            if (status && isLineStatusLinkedToCurrentUser(status)) {
+                stopLineStatusAutoRefresh();
+                showToast("ผูกบัญชี LINE สำเร็จ");
+                return;
+            }
+
+            if (remainingChecks <= 0) {
+                stopLineStatusAutoRefresh();
+            }
+        }, 3000);
+    }
+
+    function stopLineStatusAutoRefresh() {
+        if (lineStatusRefreshTimer) {
+            window.clearInterval(lineStatusRefreshTimer);
+            lineStatusRefreshTimer = null;
+        }
+    }
+
+    function isLineStatusLinkedToCurrentUser(status) {
+        if (!status) {
+            return false;
+        }
+
+        const currentUserId = getCurrentUserId();
+        const responseUserId = Number(status.user_id ?? 0);
+
+        if (!currentUserId || responseUserId !== currentUserId) {
+            return false;
+        }
+
+        return status.is_linked === true || status.has_line_user_id === true;
+    }
+
     function renderLineStatus(status) {
         const toggle = $("lineToggleBtn");
         const desc = $("lineDesc");
         const linkBtn = $("lineLinkBtn");
-        const testBtn = $("lineTestBtn");
-
+        const unlinkBtn = $("lineUnlinkBtn");
         if (!toggle || !desc || !status) {
             return;
+        }
+
+        if (unlinkBtn) {
+            unlinkBtn.hidden = true;
+            unlinkBtn.disabled = false;
+            unlinkBtn.textContent = "ยกเลิกการผูก";
         }
 
         const systemReady =
@@ -866,18 +966,19 @@
             status.can_create_link_code === true ||
             status.has_line_official_account_id === true;
 
-        const isLinked =
-            status.is_linked === true ||
-            status.has_line_user_id === true;
+        const isLinked = isLineStatusLinkedToCurrentUser(status);
 
-        const enabled =
+        const enabled = isLinked && (
             status.line_notify_enabled === true ||
-            status.line_enabled === true;
+            status.line_enabled === true
+        );
 
         toggle.checked = isLinked && enabled;
         toggle.disabled = !systemReady || !isLinked;
 
         if (!systemReady) {
+            toggle.checked = false;
+            toggle.disabled = true;
             desc.textContent = "ระบบยังไม่พร้อม";
 
             setText(
@@ -891,16 +992,14 @@
                 linkBtn.disabled = true;
             }
 
-            if (testBtn) {
-                testBtn.hidden = true;
-                testBtn.disabled = true;
-            }
 
             hideLineQr();
             return;
         }
 
         if (!canCreateLinkCode && !isLinked) {
+            toggle.checked = false;
+            toggle.disabled = true;
             desc.textContent = "ระบบยังไม่พร้อม";
 
             setText(
@@ -914,17 +1013,16 @@
                 linkBtn.disabled = true;
             }
 
-            if (testBtn) {
-                testBtn.hidden = true;
-                testBtn.disabled = true;
-            }
 
             hideLineQr();
             return;
         }
 
         if (!isLinked) {
+            toggle.checked = false;
+            toggle.disabled = true;
             desc.textContent = "ยังไม่ได้ผูก";
+            hideLineError();
 
             setText("lineStatusText", "ยังไม่ได้ผูกบัญชี LINE");
             setText(
@@ -934,14 +1032,11 @@
             setLinePill("ยังไม่ผูก", "is-warning");
 
             if (linkBtn) {
+                linkBtn.hidden = false;
                 linkBtn.disabled = false;
                 linkBtn.textContent = "ผูกบัญชี LINE";
             }
 
-            if (testBtn) {
-                testBtn.hidden = true;
-                testBtn.disabled = true;
-            }
 
             if (status.line_link_code_active && status.line_link_code) {
                 renderLineQr({
@@ -956,13 +1051,17 @@
         }
 
         desc.textContent = enabled ? "เปิดอยู่" : "ปิดอยู่";
+        hideLineError();
+        stopLineStatusAutoRefresh();
 
-        setText("lineStatusText", "ผูกบัญชี LINE แล้ว");
+        const linkedSummary = status.linked_summary || status.line_user_id_masked || "ตรวจพบ LINE userId ในระบบ";
+
+        setText("lineStatusText", `ผูกบัญชี LINE แล้ว (${linkedSummary})`);
         setText(
             "lineHelpText",
             enabled
-                ? "ระบบจะส่งแจ้งเตือน LINE เมื่อเกิด alert ตามเงื่อนไข"
-                : "เปิด toggle เพื่อรับแจ้งเตือนผ่าน LINE"
+                ? "ระบบจะส่งแจ้งเตือน LINE เมื่อเกิด alert ตามเงื่อนไข หากต้องการเปลี่ยนบัญชีให้กดยกเลิกการผูกก่อน"
+                : "เปิด toggle เพื่อรับแจ้งเตือนผ่าน LINE หรือกดยกเลิกการผูกเพื่อเปลี่ยนบัญชี"
         );
 
         setLinePill(
@@ -971,13 +1070,15 @@
         );
 
         if (linkBtn) {
-            linkBtn.disabled = false;
-            linkBtn.textContent = "ผูกบัญชีใหม่";
+            linkBtn.hidden = true;
+            linkBtn.disabled = true;
+            linkBtn.textContent = "ผูกบัญชี LINE";
         }
 
-        if (testBtn) {
-            testBtn.hidden = false;
-            testBtn.disabled = !enabled;
+        if (unlinkBtn) {
+            unlinkBtn.hidden = false;
+            unlinkBtn.disabled = false;
+            unlinkBtn.textContent = "ยกเลิกการผูก";
         }
 
         hideLineQr();
@@ -1041,9 +1142,12 @@
         setText("lineStatusText", "สแกน QR Code แล้วกดส่งรหัสใน LINE เพื่อผูกบัญชี");
         setText("lineHelpText", "ถ้าสแกนไม่ได้ ให้คัดลอกรหัสแล้วส่งในแชต LINE Official Account");
         setLinePill("รอผูกบัญชี", "is-warning");
+        startLineStatusAutoRefresh();
     }
 
     function hideLineQr() {
+        stopLineStatusAutoRefresh();
+
         const qrArea = $("lineQrArea");
         const qrBox = $("lineQrCode");
         const openBtn = $("lineOpenBtn");
@@ -1207,8 +1311,47 @@
         return data;
     }
 
+    async function unlinkLineAccount() {
+        const userId = getCurrentUserId();
+
+        if (!userId) {
+            throw new Error("ไม่พบข้อมูลผู้ใช้ที่เข้าสู่ระบบ");
+        }
+
+        if (api.unlinkLineAccount) {
+            return api.unlinkLineAccount(userId);
+        }
+
+        const response = await fetch(`${utils.API_BASE}/notification/line/unlink`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ user_id: userId }),
+        });
+
+        const contentType = response.headers.get("content-type") || "";
+        const data = contentType.includes("application/json")
+            ? await response.json()
+            : null;
+
+        if (!response.ok) {
+            throw new Error(data?.detail || `LINE unlink error ${response.status}`);
+        }
+
+        if (data && data.success === false) {
+            throw new Error(data.detail || data.message || "LINE unlink failed");
+        }
+
+        return data;
+    }
+
     async function setLineEnabled(enabled) {
         const userId = getCurrentUserId();
+
+        if (!userId) {
+            throw new Error("ไม่พบข้อมูลผู้ใช้ที่เข้าสู่ระบบ");
+        }
 
         if (api.setLineEnabled) {
             const data = await api.setLineEnabled(userId, enabled);
@@ -1253,37 +1396,6 @@
         }
 
         return status;
-    }
-
-    async function testLineNotification() {
-        const userId = getCurrentUserId();
-
-        if (!userId) {
-            throw new Error("ไม่พบข้อมูลผู้ใช้ที่เข้าสู่ระบบ");
-        }
-
-        if (api.testLineNotification) {
-            return api.testLineNotification(userId);
-        }
-
-        const response = await fetch(`${utils.API_BASE}/notification/test-line`, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-            },
-            body: JSON.stringify({ user_id: userId }),
-        });
-
-        const contentType = response.headers.get("content-type") || "";
-        const data = contentType.includes("application/json")
-            ? await response.json()
-            : null;
-
-        if (!response.ok) {
-            throw new Error(data?.detail || `LINE test error ${response.status}`);
-        }
-
-        return data;
     }
 
     async function copyText(text) {

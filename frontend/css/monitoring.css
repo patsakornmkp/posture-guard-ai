@@ -1338,6 +1338,18 @@ body.app-monitoring {
     color: #ffffff;
 }
 
+.line-action-btn.is-danger {
+    border-color: rgba(220, 38, 38, 0.22);
+    background: #fff5f5;
+    color: #b42318;
+}
+
+.line-action-btn.is-danger:hover {
+    border-color: rgba(220, 38, 38, 0.36);
+    background: #fee4e2;
+    color: #991b1b;
+}
+
 .line-action-btn:disabled,
 .line-copy-btn:disabled {
     cursor: not-allowed;

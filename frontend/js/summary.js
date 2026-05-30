@@ -325,11 +325,18 @@
     }
 
     function calculateMetrics(summary) {
-        const issueSeconds = Math.max(
-            summary.badSeconds,
-            summary.forwardSeconds + summary.roundedSeconds,
+        // badSeconds คือเวลาท่าผิดรวมจริง
+        // ไม่ใช้ forwardSeconds + roundedSeconds เป็นเวลารวม
+        // เพราะถ้าคอยื่นและไหล่ห่อเกิดพร้อมกัน จะทำให้เวลาถูกนับซ้ำ
+        const fallbackIssueSeconds = Math.max(
+            summary.forwardSeconds,
+            summary.roundedSeconds,
             0
         );
+
+        const issueSeconds = summary.badSeconds > 0
+            ? Math.max(summary.badSeconds, 0)
+            : fallbackIssueSeconds;
 
         const measuredSeconds = summary.effectiveSeconds > 0
             ? summary.effectiveSeconds
