@@ -69,7 +69,7 @@ MIN_VISIBILITY: float = 0.65
 LANDMARK_SMOOTHING_ALPHA: float = 0.30
 
 # วาดเฉพาะจุดที่ใช้จริง ไม่วาด skeleton ทั้งตัว
-DRAW_FULL_BODY_SKELETON: bool = False
+DRAW_FULL_BODY_SKELETON: bool = True
 
 # ทิศทางด้านหน้าของผู้ใช้ในภาพ
 # 1  = ด้านหน้าอยู่ทางขวาของภาพ
@@ -197,10 +197,10 @@ MARKER_TEMPORAL_WEIGHT: float = 0.6
 # - ตอนใช้งานจริงแนะนำ 180 วินาที
 
 # ระยะเวลาที่ต้องผิดท่าต่อเนื่องก่อนแจ้งเตือน
-ISSUE_ALERT_DURATION: float = 10
+ISSUE_ALERT_DURATION: float = 180.0
 
 # ระยะเวลาแจ้งเตือนซ้ำ หากยังผิดท่าต่อเนื่อง
-ISSUE_REPEAT_ALERT_INTERVAL: float = 10
+ISSUE_REPEAT_ALERT_INTERVAL: float = 180.0
 
 # ให้ notification_service ใช้ชื่อกลางนี้ได้
 # เพื่อรักษา duplicate guard ให้ตรงกับ repeat interval ของระบบหลัก
